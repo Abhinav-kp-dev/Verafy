@@ -45,6 +45,20 @@ type Config struct {
 	NightlyHour    int    // local hour (0-23) the pre-visit run fires for tomorrow's appointments
 	Timezone       string
 
+	// AI voice verification for payers without real-time 270/271
+	VoiceMode          string        // "live" | "mock"
+	VoiceProvider      string        // "bolna" (India-native, default) | "retell"
+	VoiceWebhookSecret string        // shared secret for providers whose callbacks are not signed (Bolna)
+	VoiceCallTimeout   time.Duration // watchdog: CALL_IN_PROGRESS longer than this -> manual review
+	VoiceMockDelay     time.Duration // mock mode: how long a fake call "lasts"
+	BolnaAPIKey        string
+	BolnaAgentID       string
+	BolnaFromNumber    string // optional connected Exotel/Plivo number for a +91 caller ID
+	BolnaBaseURL       string // override for local testing
+	RetellAPIKey       string // also the webhook signing secret
+	RetellAgentID      string
+	RetellFromNumber   string // E.164, purchased through Retell
+
 	// In-app assistant (Gemini)
 	GeminiAPIKey  string
 	GeminiModel   string
@@ -84,6 +98,18 @@ func Load() (*Config, error) {
 		SMTPFrom:         env("SMTP_FROM", ""),
 		NightlyHour:      envInt("NIGHTLY_HOUR", 18),
 		Timezone:         env("TIMEZONE", "Asia/Kolkata"),
+		VoiceMode:          env("VOICE_MODE", "mock"),
+		VoiceProvider:      env("VOICE_PROVIDER", "bolna"),
+		VoiceWebhookSecret: env("VOICE_WEBHOOK_SECRET", ""),
+		VoiceCallTimeout:   envDur("VOICE_CALL_TIMEOUT", 10*time.Minute),
+		VoiceMockDelay:     envDur("VOICE_MOCK_DELAY", 8*time.Second),
+		BolnaAPIKey:        env("BOLNA_API_KEY", ""),
+		BolnaAgentID:       env("BOLNA_AGENT_ID", ""),
+		BolnaFromNumber:    env("BOLNA_FROM_NUMBER", ""),
+		BolnaBaseURL:       env("BOLNA_BASE_URL", ""),
+		RetellAPIKey:       env("RETELL_API_KEY", ""),
+		RetellAgentID:      env("RETELL_AGENT_ID", ""),
+		RetellFromNumber:   env("RETELL_FROM_NUMBER", ""),
 		GeminiAPIKey:     env("GEMINI_API_KEY", ""),
 		GeminiModel:      env("GEMINI_MODEL", "gemini-2.5-flash"),
 		GeminiBaseURL:    env("GEMINI_BASE_URL", ""),
@@ -99,6 +125,24 @@ func Load() (*Config, error) {
 	}
 	if c.StediMode != "live" && c.StediMode != "mock" {
 		return nil, fmt.Errorf("STEDI_MODE must be live or mock, got %q", c.StediMode)
+	}
+	if c.VoiceMode != "live" && c.VoiceMode != "mock" {
+		return nil, fmt.Errorf("VOICE_MODE must be live or mock, got %q", c.VoiceMode)
+	}
+	if c.VoiceProvider != "bolna" && c.VoiceProvider != "retell" {
+		return nil, fmt.Errorf("VOICE_PROVIDER must be bolna or retell, got %q", c.VoiceProvider)
+	}
+	if c.VoiceMode == "live" {
+		switch c.VoiceProvider {
+		case "bolna":
+			if c.BolnaAPIKey == "" || c.BolnaAgentID == "" || c.VoiceWebhookSecret == "" {
+				return nil, fmt.Errorf("VOICE_MODE=live with bolna requires BOLNA_API_KEY, BOLNA_AGENT_ID and VOICE_WEBHOOK_SECRET")
+			}
+		case "retell":
+			if c.RetellAPIKey == "" || c.RetellAgentID == "" || c.RetellFromNumber == "" {
+				return nil, fmt.Errorf("VOICE_MODE=live with retell requires RETELL_API_KEY, RETELL_AGENT_ID and RETELL_FROM_NUMBER")
+			}
+		}
 	}
 	return c, nil
 }

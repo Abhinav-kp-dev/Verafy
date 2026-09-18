@@ -20,6 +20,7 @@ import (
 	"coveragecheck/internal/queue"
 	"coveragecheck/internal/ratelimit"
 	"coveragecheck/internal/stedi"
+	"coveragecheck/internal/voiceagent"
 )
 
 func main() {
@@ -58,11 +59,27 @@ func main() {
 	geminiClient := chatbot.NewWithBaseURL(cfg.GeminiAPIKey, cfg.GeminiModel, cfg.GeminiBaseURL, cfg.GeminiRPM)
 	assistant := chatbot.NewAssistant(geminiClient, store, log)
 
-	q, err := queue.New(store.Pool, &queue.Deps{Cfg: cfg, Store: store, Stedi: client, LLM: gen, Limiter: limiter, Log: log},
+	var voice voiceagent.Client
+	var voiceMock *voiceagent.Mock
+	if cfg.VoiceMode == "live" && cfg.VoiceProvider == "bolna" {
+		voice = voiceagent.NewBolna(cfg.BolnaAPIKey, cfg.BolnaAgentID, cfg.BolnaFromNumber, cfg.BolnaBaseURL)
+	} else if cfg.VoiceMode == "live" {
+		voice = voiceagent.NewRetell(cfg.RetellAPIKey, cfg.RetellAgentID, cfg.RetellFromNumber)
+	} else {
+		voiceMock = &voiceagent.Mock{Delay: cfg.VoiceMockDelay, Log: log}
+		voice = voiceMock
+	}
+
+	salvage := voiceagent.NewTranscriptExtractor(cfg.OpenRouterAPIKey, cfg.LLMModel)
+
+	q, err := queue.New(store.Pool, &queue.Deps{Cfg: cfg, Store: store, Stedi: client, LLM: gen, Limiter: limiter, Voice: voice, Salvage: salvage, Log: log},
 		&queue.NoticeDeps{Sender: sender, PracticePhone: cfg.PracticePhone})
 	if err != nil {
 		log.Error("queue", "err", err)
 		os.Exit(1)
+	}
+	if voiceMock != nil {
+		voiceMock.Completer = q // the mock finishes calls through the same path the webhook uses
 	}
 	if err := q.Start(ctx); err != nil {
 		log.Error("queue start", "err", err)
@@ -90,6 +107,7 @@ func main() {
 	}
 	log.Info("pre-visit notices", "email_provider", provider, "nightly_hour", cfg.NightlyHour, "tz", loc.String())
 	log.Info("in-app assistant", "configured", assistant.Configured(), "model", cfg.GeminiModel, "gemini_rpm", cfg.GeminiRPM, "chat_rpm", cfg.ChatRPM)
+	log.Info("voice verification", "mode", voice.Mode(), "provider", cfg.VoiceProvider, "call_timeout", cfg.VoiceCallTimeout)
 
 	httpSrv := &http.Server{Addr: ":" + cfg.Port, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 

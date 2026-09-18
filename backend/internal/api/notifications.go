@@ -96,6 +96,10 @@ func reasonText(r *db.ReviewReason) string {
 		return "Payer response could not be parsed"
 	case db.ReasonPayerRejected:
 		return "Payer rejected the request"
+	case db.ReasonVoiceCallFailed:
+		return "AI phone call could not complete verification"
+	case db.ReasonCallTimeout:
+		return "AI phone call timed out"
 	default:
 		return string(*r)
 	}

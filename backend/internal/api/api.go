@@ -86,6 +86,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerControlRoutes(mux)
 	s.registerPDFRoutes(mux)
 	s.registerNotificationRoutes(mux)
+	s.registerVoiceRoutes(mux)
 	return s.cors(s.inboundLimit(mux))
 }
 
@@ -193,6 +194,9 @@ func (s *Server) configInfo(w http.ResponseWriter, r *http.Request) {
 		"nightlyHour":   s.cfg.NightlyHour,
 		"timezone":      s.cfg.Timezone,
 		"practicePhone": s.cfg.PracticePhone,
+		"voiceMode":     s.cfg.VoiceMode,
+		"voiceProvider": s.cfg.VoiceProvider,
+		"voiceCallTimeout": s.cfg.VoiceCallTimeout.String(),
 	})
 }
 

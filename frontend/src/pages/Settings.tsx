@@ -1,13 +1,28 @@
 import { useEffect, useState } from 'react'
 import { api, type ConfigInfo, type Payer, type RateLimitState } from '../api'
 import { useLive } from '../live'
+import { Icon, useToast } from '../components/ui'
 
 export function Settings() {
   const [cfg, setCfg] = useState<ConfigInfo | null>(null)
   const [payers, setPayers] = useState<Payer[]>([])
   const [tab, setTab] = useState<'clinic' | 'payers' | 'engine'>('clinic')
   const { rateLimits } = useLive()
+  const toast = useToast()
+  const [editing, setEditing] = useState<Payer | null>(null)
+  const [voice, setVoice] = useState({ providerServicesPhone: '', ivrNotes: '' })
+  const [saving, setSaving] = useState(false)
   useEffect(() => { api.config().then(setCfg); api.payers().then(setPayers) }, [])
+  const saveVoice = async () => {
+    if (!editing) return
+    setSaving(true)
+    try {
+      const p = await api.updatePayerVoice(editing.id, voice)
+      setPayers((list) => list.map((x) => (x.id === p.id ? p : x)))
+      toast.show(p.providerServicesPhone ? `${p.name}: the AI agent will now call ${p.providerServicesPhone}` : `${p.name}: voice line removed — back to plain manual review`)
+      setEditing(null)
+    } catch (e) { toast.show((e as Error).message, true) } finally { setSaving(false) }
+  }
   const rl = (id: string): RateLimitState | undefined => rateLimits.find((r) => r.payer === id)
 
   return (
@@ -32,20 +47,42 @@ export function Settings() {
             </div>
           )}
           {tab === 'payers' && (
+            <>
+            <div className="notice blue" style={{ marginBottom: 14 }}><span>☎</span><div>Payers marked <b>No EDI</b> can't be checked electronically. Give one an <b>AI call line</b> and the voice agent will phone it with the same member ID, DOB and NPI a 270 would carry; leave it empty and those checks go straight to Manual Review.</div></div>
             <table className="tbl">
-              <thead><tr><th>Payer</th><th>Stedi Payer ID</th><th>Service type</th><th>Real-time 270/271</th><th>Rate limit</th><th>Live state</th></tr></thead>
+              <thead><tr><th>Payer</th><th>Stedi Payer ID</th><th>Service type</th><th>Real-time 270/271</th><th>AI call line</th><th>Rate limit</th><th>Live state</th></tr></thead>
               <tbody>
                 {payers.map((p) => { const s = rl(p.stediPayerId); return (
                   <tr key={p.id}>
                     <td className="cell-main">{p.name}</td>
                     <td className="num">{p.stediPayerId}</td>
                     <td>STC {p.serviceTypeCode}</td>
-                    <td>{p.supportsRealtime ? <span className="badge tone-success"><span className="dot" />Supported</span> : <span className="badge tone-warning"><span className="dot" />Manual only</span>}</td>
+                    <td>{p.supportsRealtime ? <span className="badge tone-success"><span className="dot" />Supported</span> : <span className="badge tone-warning"><span className="dot" />No EDI</span>}</td>
+                    <td>
+                      {p.supportsRealtime ? <span className="cell-sub">—</span> : editing?.id === p.id ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 260 }}>
+                          <input className="input num" placeholder="+919876543210" value={voice.providerServicesPhone} onChange={(e) => setVoice({ ...voice, providerServicesPhone: e.target.value })} />
+                          <input className="input" placeholder="IVR hints, e.g. press 2 then 1; say 'representative'" value={voice.ivrNotes} onChange={(e) => setVoice({ ...voice, ivrNotes: e.target.value })} />
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button className="btn btn-primary btn-sm" disabled={saving} onClick={saveVoice}>Save</button>
+                            <button className="btn btn-ghost btn-sm" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          {p.providerServicesPhone
+                            ? <span className="badge tone-violet"><Icon name="phone" size={12} /> {p.providerServicesPhone}</span>
+                            : <span className="cell-sub">none — manual review</span>}
+                          <button className="link" onClick={() => { setEditing(p); setVoice({ providerServicesPhone: p.providerServicesPhone ?? '', ivrNotes: p.ivrNotes ?? '' }) }}>{p.providerServicesPhone ? 'Edit' : 'Add line'}</button>
+                        </div>
+                      )}
+                    </td>
                     <td className="num">{cfg?.payerRPS} req/s · burst {cfg?.payerBurst}</td>
                     <td className="cell-sub num">{s ? `${s.inFlight} in flight · ${s.waiting} waiting · ${s.throttledTotal} throttled` : '—'}</td>
                   </tr>) })}
               </tbody>
             </table>
+            </>
           )}
           {tab === 'engine' && cfg && (
             <dl className="kv" style={{ maxWidth: 720, rowGap: 12 }}>
@@ -59,10 +96,18 @@ export function Settings() {
               <dt>Queue</dt><dd>River (Postgres-backed) — jobs survive restarts; state changes fan out via LISTEN/NOTIFY → SSE</dd>
               <dt>Pre-visit notices</dt><dd>Nightly run at <b className="num">{String(cfg.nightlyHour ?? 18).padStart(2, '0')}:00</b> {cfg.timezone} for tomorrow's appointments → verify → estimate against the fee schedule → notice. Email delivery: {cfg.emailDelivery ? <span className="badge tone-success"><span className="dot" />on · {cfg.emailProvider}</span> : <span className="badge tone-neutral"><span className="dot" />off — notices are logged in-app</span>}{!cfg.emailDelivery && <div className="help" style={{ marginTop: 6 }}>To send for real, add to <code>backend/.env</code> and restart — Gmail: <code>SMTP_HOST=smtp.gmail.com SMTP_PORT=587 SMTP_USER=you@gmail.com SMTP_PASS=&lt;16-char App Password&gt;</code> · or <code>RESEND_API_KEY=…</code></div>}</dd>
               <dt>Coverage brief</dt><dd>{cfg.llmEnabled ? <>LLM ({cfg.llmModel}) over field-mapped facts, every number validated against the payer response; template fallback on mismatch</> : <>Deterministic template (set <code>OPENROUTER_API_KEY</code> to enable the LLM writer — numbers are validated either way)</>}</dd>
+              <dt>Payers without real-time EDI</dt><dd>
+                An AI voice agent calls the payer's provider-services line with the same member ID, DOB and NPI a 270 would carry, collects benefits through a structured tool call, and the result rejoins the normal brief pipeline tagged <code>ai_voice_call</code>. Watchdog: <b className="num">{cfg.voiceCallTimeout ?? '10m'}</b>, then Manual Review with the transcript.
+                {' '}{cfg.voiceMode === 'live'
+                  ? <span className="badge tone-success"><span className="dot" />live · {cfg.voiceProvider ?? 'bolna'}</span>
+                  : <span className="badge tone-info"><span className="dot" />simulated — no calls placed</span>}
+                {cfg.voiceMode !== 'live' && <div className="help" style={{ marginTop: 6 }}>To place real calls (India-ready via Bolna): <code>VOICE_MODE=live VOICE_PROVIDER=bolna BOLNA_API_KEY=… BOLNA_AGENT_ID=… VOICE_WEBHOOK_SECRET=…</code>, build the agent from <code>GET /api/voice/agent-spec?baseUrl=&lt;public URL&gt;</code>, and add each payer's line under Payer Settings.</div>}
+              </dd>
             </dl>
           )}
         </div>
       </div>
+      {toast.el}
     </div>
   )
 }

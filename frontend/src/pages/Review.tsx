@@ -5,8 +5,8 @@ import { useSelection } from '../hooks/useSelection'
 import { Drawer, SelectionBar, useToast } from '../components/ui'
 import { JobDetail } from '../components/JobDetail'
 
-const REASONS: ReviewReason[] = ['unsupported_payer', 'ambiguous_match', 'retry_exhausted', 'payer_rejected', 'malformed_response']
-const SHORT: Record<ReviewReason, string> = { unsupported_payer: 'Payer unsupported', ambiguous_match: 'Subscriber not matched', retry_exhausted: 'Payer unavailable', payer_rejected: 'Payer rejected', malformed_response: 'Bad response' }
+const REASONS: ReviewReason[] = ['unsupported_payer', 'voice_call_failed', 'call_timeout', 'ambiguous_match', 'retry_exhausted', 'payer_rejected', 'malformed_response']
+const SHORT: Record<ReviewReason, string> = { unsupported_payer: 'Payer unsupported', voice_call_failed: 'AI call failed', call_timeout: 'AI call timed out', ambiguous_match: 'Subscriber not matched', retry_exhausted: 'Payer unavailable', payer_rejected: 'Payer rejected', malformed_response: 'Bad response' }
 
 export function Review() {
   const [jobs, setJobs] = useState<Job[]>([])
@@ -53,7 +53,7 @@ export function Review() {
                     <td className="rowcheck" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.selected.has(j.id)} onChange={() => sel.toggle(j.id)} /></td>
                     <td className="clickable" onClick={() => setOpen(j.id)}><div className="cell-main">{j.patientName}</div><div className="cell-sub">DOB {fmtDOB(j.patientDob)} · <span className="num">{j.memberId}</span></div></td>
                     <td className="clickable" onClick={() => setOpen(j.id)}><div>{j.payerName}</div><div className="cell-sub">{j.stediPayerId}</div></td>
-                    <td className="clickable" onClick={() => setOpen(j.id)}><div className="cell-main">{j.reviewReason ? REASON_TEXT[j.reviewReason] : '—'}</div><div className="cell-sub">{j.errorCode && <code>{j.errorCode}</code>} {j.errorMessage}</div></td>
+                    <td className="clickable" onClick={() => setOpen(j.id)}><div className="cell-main">{j.reviewReason ? REASON_TEXT[j.reviewReason] : '—'}</div><div className="cell-sub">{j.errorCode && <code>{j.errorCode}</code>} {j.errorMessage}{j.callTranscript && <span className="badge tone-violet" style={{ marginLeft: 6 }}>transcript</span>}</div></td>
                     <td className="num clickable" onClick={() => setOpen(j.id)}>{j.attemptCount}</td>
                     <td className="num clickable" onClick={() => setOpen(j.id)}><div>{fmtDate(j.createdAt)}</div><div className="cell-sub">{fmtTime(j.createdAt)}</div></td>
                     <td><button className="btn btn-primary btn-sm" onClick={() => setOpen(j.id)}>Review</button></td>

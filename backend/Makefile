@@ -11,6 +11,7 @@ migrate:
 	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -f migrations/002_adjustments.sql
 	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -f migrations/003_cost_notices.sql
 	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -f migrations/004_reminders.sql
+	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -f migrations/005_voice_verification.sql
 
 seed:
 	go run ./cmd/seed

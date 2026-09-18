@@ -23,6 +23,7 @@ import (
 	"coveragecheck/internal/normalize"
 	"coveragecheck/internal/ratelimit"
 	"coveragecheck/internal/stedi"
+	"coveragecheck/internal/voiceagent"
 )
 
 // VerifyArgs is the River job payload: just a pointer to our domain job.
@@ -39,6 +40,8 @@ type Deps struct {
 	Stedi   stedi.Client
 	LLM     *llm.Generator
 	Limiter *ratelimit.PayerLimiter
+	Voice   voiceagent.Client
+	Salvage *voiceagent.TranscriptExtractor // best-effort facts recovery when a call ends without a tool call
 	Log     *slog.Logger
 }
 
@@ -84,6 +87,9 @@ func (w *VerifyWorker) Work(ctx context.Context, rj *river.Job[VerifyArgs]) erro
 	case db.StatusVerified, db.StatusGapFlagged, db.StatusNeedsReview, db.StatusManualResolve:
 		log.Info("job already terminal; skipping", "status", job.Status)
 		return nil
+	case db.StatusCallInProgress:
+		log.Info("voice call already in progress; skipping", "call", job.CallID)
+		return nil
 	}
 	payer, err := d.Store.GetPayer(ctx, job.PayerID)
 	if err != nil {
@@ -95,9 +101,18 @@ func (w *VerifyWorker) Work(ctx context.Context, rj *river.Job[VerifyArgs]) erro
 	}
 
 	if !payer.SupportsRealtime {
+		if payer.VoiceEnabled() && d.Voice != nil {
+			// No EDI path, but we know the payer's phone line: the AI agent makes the call.
+			attempt, err := d.Store.MarkProcessing(ctx, jobID)
+			if err != nil {
+				return err
+			}
+			log.Info("payer has no real-time eligibility -> AI voice call", "to", *payer.ProviderServicesPhone)
+			return w.dispatchVoiceCall(ctx, log, jobID, attempt, payer, patient)
+		}
 		log.Info("payer does not support real-time eligibility -> manual review")
 		return d.Store.MarkNeedsReview(ctx, jobID, db.ReasonUnsupportedPayer, nil, "unsupported_payer",
-			fmt.Sprintf("%s does not support electronic (270/271) eligibility checks. Verify by phone or payer portal.", payer.Name))
+			fmt.Sprintf("%s does not support electronic (270/271) eligibility checks and has no phone line on file. Verify by phone or payer portal.", payer.Name))
 	}
 
 	attempt, err := d.Store.MarkProcessing(ctx, jobID)
@@ -218,6 +233,7 @@ func New(pool *pgxpool.Pool, deps *Deps, nd *NoticeDeps) (*Queue, error) {
 	q := &Queue{deps: deps}
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &VerifyWorker{d: deps, q: q})
+	river.AddWorker(workers, &VoiceTimeoutWorker{d: deps})
 	if nd != nil {
 		river.AddWorker(workers, &NoticeWorker{d: deps, nd: nd})
 	}

@@ -25,7 +25,7 @@ export function PreVisit() {
   useLiveRefresh(() => { refreshNotices() }, [], 900)
 
   const runBatch: Batch | undefined = runBatchId ? live.batches[runBatchId] : undefined
-  const inFlight = appts.filter((a) => a.jobStatus && ['QUEUED', 'PROCESSING', 'RETRYING'].includes(a.jobStatus)).length
+  const inFlight = appts.filter((a) => a.jobStatus && ['QUEUED', 'PROCESSING', 'RETRYING', 'CALL_IN_PROGRESS'].includes(a.jobStatus)).length
   const needVerify = appts.filter((a) => !a.noticeId && (!a.jobStatus || ['VERIFIED', 'COVERAGE_GAP_FLAGGED'].includes(a.jobStatus))).length
   const needReminder = appts.filter((a) => a.noticeId && !a.reminderId).length
   const pending = needVerify + needReminder

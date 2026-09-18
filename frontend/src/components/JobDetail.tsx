@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react'
 import { api, fmtDOB, fmtTime, money, NOTICE_META, REASON_TEXT, type Job, type JobAttempt, type PatientNotice } from '../api'
 import { EstimateCard } from './EstimateCard'
 import { useLive } from '../live'
-import { StatusBadge } from './ui'
+import { Icon, StatusBadge } from './ui'
 
 export function JobDetail({ jobId, onResolved }: { jobId: string; onResolved?: (j: Job) => void }) {
   const [job, setJob] = useState<Job | null>(null)
   const [attempts, setAttempts] = useState<JobAttempt[]>([])
   const [showRaw, setShowRaw] = useState(false)
+  const [showTranscript, setShowTranscript] = useState(false)
   const [note, setNote] = useState('')
   const [by, setBy] = useState('Dr. Sarah Lee')
   const [busy, setBusy] = useState(false)
@@ -28,6 +29,8 @@ export function JobDetail({ jobId, onResolved }: { jobId: string; onResolved?: (
   if (!job) return <div className="empty">Loading…</div>
   const b = job.normalizedBrief
   const f = b?.facts
+  const byVoice = job.verificationSource === 'ai_voice_call'
+  const voiceReason = job.reviewReason === 'voice_call_failed' || job.reviewReason === 'call_timeout'
 
   const resolve = async (outcome: 'verified' | 'requeue') => {
     setBusy(true); setErr('')
@@ -44,9 +47,22 @@ export function JobDetail({ jobId, onResolved }: { jobId: string; onResolved?: (
           <h2 style={{ fontSize: 20 }}>{job.patientName}</h2>
           <div className="cell-sub">DOB {fmtDOB(job.patientDob)} · Member ID <span className="num">{job.memberId}</span></div>
           <div className="cell-sub">{job.payerName} · Payer ID {job.stediPayerId}</div>
+          {byVoice && <div style={{ marginTop: 6 }}><span className="badge tone-violet"><Icon name="phone" size={12} /> {job.status === 'VERIFIED' || job.status === 'COVERAGE_GAP_FLAGGED' ? 'Verified by AI phone call' : job.status === 'CALL_IN_PROGRESS' ? 'AI phone call in progress' : 'AI phone call attempted'}{job.payerPhone ? ` · ${job.payerPhone}` : ''}</span></div>}
         </div>
         <StatusBadge status={job.status} job={job} />
       </div>
+
+      {job.status === 'CALL_IN_PROGRESS' && (
+        <div className="notice blue">
+          <span>☎</span>
+          <div>
+            <b>AI agent is on the phone with {job.payerName}{job.payerPhone ? ` (${job.payerPhone})` : ''}.</b>
+            <div style={{ fontSize: 12, marginTop: 4 }}>
+              Started {fmtTime(job.callStartedAt)}. It is reading the same member ID and DOB it would have sent electronically, and will post the benefits here the moment the representative confirms them. If it cannot get through, this lands in Manual Review with the transcript — never dropped silently.
+            </div>
+          </div>
+        </div>
+      )}
 
       {job.status === 'NEEDS_MANUAL_REVIEW' && (
         <div className="notice error">
@@ -55,7 +71,9 @@ export function JobDetail({ jobId, onResolved }: { jobId: string; onResolved?: (
             <b>{job.reviewReason ? REASON_TEXT[job.reviewReason] : 'Needs manual verification'}</b>
             {job.errorMessage && <div style={{ marginTop: 4 }}>{job.errorCode && <code>{job.errorCode}</code>} {job.errorMessage}</div>}
             <div style={{ marginTop: 6, fontSize: 12 }}>
-              Next step: call the payer with member ID <b className="num">{job.memberId}</b> and DOB <b>{fmtDOB(job.patientDob)}</b>, then record the outcome below.
+              {job.payerPhone
+                ? <>Next step: have the AI agent call {job.payerName} at <b className="num">{job.payerPhone}</b>{voiceReason ? ' again' : ''}, or call yourself with member ID <b className="num">{job.memberId}</b> and DOB <b>{fmtDOB(job.patientDob)}</b> and record the outcome below.</>
+                : <>Next step: call the payer with member ID <b className="num">{job.memberId}</b> and DOB <b>{fmtDOB(job.patientDob)}</b>, then record the outcome below.</>}
             </div>
           </div>
         </div>
@@ -69,7 +87,7 @@ export function JobDetail({ jobId, onResolved }: { jobId: string; onResolved?: (
 
       {b && job.status !== 'MANUAL_RESOLVED' && (
         <div className="card card-pad" style={{ background: 'var(--surface-alt)' }}>
-          <div className="cell-sub" style={{ marginBottom: 6 }}>Coverage brief · {b.source === 'llm' ? `AI-written (${b.model}) — ${b.validation}` : b.source === 'template_fallback' ? `template (model output ${b.validation})` : 'deterministic template'}</div>
+          <div className="cell-sub" style={{ marginBottom: 6 }}>Coverage brief · {byVoice ? 'from the payer call · ' : ''}{b.source === 'llm' ? `AI-written (${b.model}) — ${b.validation}` : b.source === 'template_fallback' ? `template (model output ${b.validation})` : 'deterministic template'}</div>
           <div style={{ fontSize: 15, lineHeight: 1.6 }}>{b.brief}</div>
         </div>
       )}
@@ -96,6 +114,7 @@ export function JobDetail({ jobId, onResolved }: { jobId: string; onResolved?: (
             </div>
           )}
           {f.limitations.length > 0 && <div className="cell-sub">Limitations: {f.limitations.join(' · ')}</div>}
+          {byVoice && f.payerMessages.length > 0 && <div className="cell-sub">From the call: {f.payerMessages.join(' · ')}</div>}
           {f.flags.length > 0 && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{f.flags.map((fl) => <span key={fl} className="badge tone-neutral">{fl}</span>)}</div>}
         </>
       )}
@@ -110,7 +129,9 @@ export function JobDetail({ jobId, onResolved }: { jobId: string; onResolved?: (
           {err && <div className="notice error" style={{ marginTop: 10 }}>{err}</div>}
           <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
             <button className="btn btn-primary" disabled={busy} onClick={() => resolve('verified')}>Mark manually verified</button>
-            <button className="btn btn-ghost" disabled={busy} onClick={() => resolve('requeue')}>Re-run automated check</button>
+            {job.payerPhone
+              ? <button className="btn btn-outline" disabled={busy} onClick={() => resolve('requeue')}><Icon name="phone" size={14} /> {voiceReason ? 'Call payer again with AI agent' : 'Call payer with AI agent'}</button>
+              : <button className="btn btn-ghost" disabled={busy} onClick={() => resolve('requeue')}>Re-run automated check</button>}
           </div>
         </div>
       )}
@@ -139,9 +160,16 @@ export function JobDetail({ jobId, onResolved }: { jobId: string; onResolved?: (
         </table>
       </div>
 
+      {job.callTranscript && (
+        <div>
+          <button className="link" onClick={() => setShowTranscript(!showTranscript)}>{showTranscript ? 'Hide' : 'Show'} call transcript{job.callCompletedAt ? ` · ended ${fmtTime(job.callCompletedAt)}` : ''}</button>
+          {showTranscript && <pre className="raw transcript">{job.callTranscript}</pre>}
+        </div>
+      )}
+
       {job.rawResponse != null && (
         <div>
-          <button className="link" onClick={() => setShowRaw(!showRaw)}>{showRaw ? 'Hide' : 'Show'} raw 271 response (X12 → JSON via Stedi)</button>
+          <button className="link" onClick={() => setShowRaw(!showRaw)}>{showRaw ? 'Hide' : 'Show'} {byVoice ? 'facts submitted by the AI agent' : 'raw 271 response (X12 → JSON via Stedi)'}</button>
           {showRaw && <pre className="raw">{JSON.stringify(job.rawResponse, null, 2)}</pre>}
         </div>
       )}

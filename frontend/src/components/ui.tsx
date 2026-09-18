@@ -17,7 +17,7 @@ export function StatusBadge({ status, job }: { status: JobStatus; job?: Job }) {
     const secs = job.nextAttemptAt ? Math.max(0, Math.round((new Date(job.nextAttemptAt).getTime() - Date.now()) / 1000)) : 0
     label = `Retry ${job.attemptCount}/${maxAttempts} · ${secs > 0 ? `next in ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : 'retrying…'}`
   }
-  const live = status === 'PROCESSING' || status === 'RETRYING'
+  const live = status === 'PROCESSING' || status === 'RETRYING' || status === 'CALL_IN_PROGRESS'
   return <span className={`badge tone-${m.tone} ${live ? 'pulse' : ''}`}><span className="dot" />{label}</span>
 }
 
@@ -50,6 +50,7 @@ export function Icon({ name, size = 18 }: { name: string; size?: number }) {
     case 'pause': return <svg {...p}><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
     case 'play': return <svg {...p} fill="currentColor" strokeWidth={0}><path d="M7 4l13 8-13 8z" /></svg>
     case 'download': return <svg {...p}><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M4 21h16" /></svg>
+    case 'phone': return <svg {...p}><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2" /></svg>
     default: return null
   }
 }

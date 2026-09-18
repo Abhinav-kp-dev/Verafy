@@ -17,6 +17,7 @@ Verafy is a full-stack insurance eligibility verification platform built for den
 - 📊 **Live dashboard** — Postgres `LISTEN/NOTIFY` → coalesced SSE → real-time job counters, batch progress, rate-limit state
 - 🤖 **AI brief** — Gemini-powered plain-English coverage summary with post-hoc numeric validation; falls back to a deterministic template on any mismatch
 - 📬 **Pre-visit cost notices** — estimates patient out-of-pocket share (deductible → coinsurance → annual max) and emails it before the appointment
+- ☎️ **AI voice verification for payers with no EDI** — when a payer can't be checked electronically, a voice agent phones its provider-services line with the same member ID/DOB/NPI a 270 would carry, asks a fixed question script, records the answers through a structured tool call, and the result rejoins the normal pipeline tagged `ai_voice_call` (India-ready via Bolna; Retell supported)
 - 🔔 **Live notification center** — derived entirely from real state (new manual-review cases, failed email deliveries, a paused queue) — never a fabricated event
 - ⏯️ **Queue control** — pause/resume the verification queue and purge everything still waiting, from one toggle in the topbar
 - 📄 **PDF export** — download a single patient's record or the full practice report as a print-ready PDF, generated server-side
@@ -52,8 +53,12 @@ QUEUED ──► PROCESSING ──► VERIFIED                         (terminal
                       ├──► COVERAGE_GAP_FLAGGED            (terminal — active but gaps)
                       ├──► RETRYING ──► PROCESSING         (transient payer error — backoff)
                       │             └► NEEDS_MANUAL_REVIEW (retry budget exhausted)
-                      └──► NEEDS_MANUAL_REVIEW             (rejected / unsupported payer)
+                      ├──► CALL_IN_PROGRESS                (no EDI, payer has a phone line — AI agent dials)
+                      │        ├► VERIFIED | COVERAGE_GAP_FLAGGED   (facts submitted mid-call, validated)
+                      │        └► NEEDS_MANUAL_REVIEW              (voice_call_failed | call_timeout, transcript kept)
+                      └──► NEEDS_MANUAL_REVIEW             (rejected / unsupported payer, no phone line)
 NEEDS_MANUAL_REVIEW ──► MANUAL_RESOLVED                    (staff action, audited)
+NEEDS_MANUAL_REVIEW ──► QUEUED                             ("Call payer with AI agent" / re-run)
 ```
 
 ### Repository Layout
@@ -65,8 +70,9 @@ backend/
   cmd/seedprevisit  fee schedule + tomorrow's appointments
   cmd/reset         wipe jobs/batches before a demo (keeps patients)
   cmd/loadtest      synthetic load runner with live counters
-  internal/api      HTTP handlers, CORS, inbound rate limit, notifications, PDF routes
-  internal/queue    River worker (state machine) + retry logic + pause/resume/purge control
+  internal/api      HTTP handlers, CORS, inbound rate limit, notifications, PDF + voice webhooks
+  internal/queue    River worker (state machine) + retry logic + voice dispatch/completion/watchdog
+  internal/voiceagent  Bolna + Retell clients, mock stand-in, facts validation, agent spec
   internal/stedi    X12 270/271 live client + mock simulator
   internal/normalize  271 → typed Facts field mapper (no AI)
   internal/llm      Gemini brief writer + numeric validation + template fallback
@@ -134,6 +140,31 @@ curl -F file=@seed-data/patients.csv localhost:8080/api/batches/csv
 
 ---
 
+## AI Voice Verification (payers with no real-time EDI)
+
+Some payers (e.g. Delta Dental in test mode) have no 270/271 path. Instead of parking those checks in Manual Review, Verafy can place a **real phone call**:
+
+1. The worker sees `supports_realtime = false` **and** a `provider_services_phone` on the payer.
+2. It asks the voice platform to dial that line, passing the same fields a 270 carries (patient name, DOB, member ID, provider NPI, payer name, IVR hints) as per-call variables, and parks the job in `CALL_IN_PROGRESS` (live badge "Calling Payer").
+3. The agent follows a fixed question script — active/inactive, deductible + remaining, annual max + remaining, coinsurance for preventive/basic/major, orthodontics, waiting periods, rep name + reference number.
+4. As soon as it has the numbers it calls the `submit_verification_facts` tool → our webhook validates them (completeness + plausibility), maps them into the same `Facts` object the 271 normalizer produces, runs the normal brief pipeline, and finalizes to `VERIFIED` / `COVERAGE_GAP_FLAGGED` with `verification_source = ai_voice_call`.
+5. No answer, IVR dead end, dropped call, refused rep or a watchdog timeout (`VOICE_CALL_TIMEOUT`, default 10 min) → `NEEDS_MANUAL_REVIEW` with reason `voice_call_failed` / `call_timeout` and the transcript attached, so staff never start cold. A late webhook can never overwrite a finished job.
+
+**Provider:** [Bolna](https://bolna.ai) by default — India-native, its default line dials +91 numbers directly (the callee sees a +1 caller ID; connect an Exotel/Plivo number and set `BOLNA_FROM_NUMBER` for a +91 caller ID). Retell is supported via `VOICE_PROVIDER=retell`.
+
+**Mock mode** (`VOICE_MODE=mock`, the default) places no calls: a deterministic stand-in drives the exact same completion path, so the whole flow is demoable offline. Scenario is chosen by the member ID's last digit — `…0` no answer, `…9` IVR dead end, `…5` inactive coverage, anything else active. Transcripts in mock mode are clearly labelled as generated.
+
+### Going live with Bolna (~15 min)
+
+1. Sign up at bolna.ai, copy the API key.
+2. Expose the backend publicly (e.g. `ngrok http 8080`) and open `GET /api/voice/agent-spec?baseUrl=https://<your-ngrok>.ngrok.app` — it returns the prompt, the custom-function definition in Bolna's own format (URL, `api_token`, `param` mapping), and the execution-webhook URL.
+3. In Bolna: create an agent, paste the prompt, add the custom function verbatim, and set **Extractions → Push all execution data to webhook** to the returned URL.
+4. `backend/.env`: `VOICE_MODE=live VOICE_PROVIDER=bolna BOLNA_API_KEY=… BOLNA_AGENT_ID=… VOICE_WEBHOOK_SECRET=<long random string>` (the same secret you pasted into the function's `api_token`; the webhook URL carries it as `?token=`).
+5. **Settings → Payer Settings → Add line** on any "No EDI" payer and enter the number to dial. For a demo, that can be a colleague's phone answering as the rep.
+6. Verify a patient on that payer and watch Dashboard → "Calling payer", then the drawer: brief, facts, transcript.
+
+---
+
 ## Environment Variables
 
 ### Backend (`backend/.env`)
@@ -162,6 +193,14 @@ curl -F file=@seed-data/patients.csv localhost:8080/api/batches/csv
 | `SMTP_PASS` | — | for email | Gmail App Password (16 chars) |
 | `NIGHTLY_HOUR` | `18` | | Hour for the pre-visit nightly run |
 | `TIMEZONE` | `Asia/Kolkata` | | Timezone for scheduling |
+| `VOICE_MODE` | `mock` | | `mock` (no calls; simulated completion) or `live` |
+| `VOICE_PROVIDER` | `bolna` | | `bolna` (India-ready) or `retell` |
+| `VOICE_CALL_TIMEOUT` | `10m` | | Watchdog before a stuck call goes to Manual Review |
+| `VOICE_MOCK_DELAY` | `8s` | | Mock only: simulated call length |
+| `BOLNA_API_KEY` / `BOLNA_AGENT_ID` | — | if live+bolna | From the Bolna dashboard |
+| `BOLNA_FROM_NUMBER` | — | optional | Connected Exotel/Plivo number for a +91 caller ID |
+| `VOICE_WEBHOOK_SECRET` | — | if live+bolna | Shared secret for Bolna's (unsigned) callbacks |
+| `RETELL_API_KEY` / `RETELL_AGENT_ID` / `RETELL_FROM_NUMBER` | — | if live+retell | Retell credentials (webhooks are HMAC-signed with the key) |
 
 ### Frontend (`frontend/.env`)
 
@@ -193,7 +232,9 @@ curl -F file=@seed-data/patients.csv localhost:8080/api/batches/csv
 | Aardvark Dent | Anthem BCBS CA | `AFK987654321` | ⚠️ COVERAGE_GAP_FLAGGED (ortho) |
 | Jane Doe | UnitedHealthcare | `UHCAAA42` | 🔄 RETRYING ×3 → NEEDS_MANUAL_REVIEW |
 | Jane Doe | UnitedHealthcare | `UHCAAA75` | 🚨 NEEDS_MANUAL_REVIEW (subscriber not found) |
-| Olivia Bennett | Delta Dental | `E788123456` | 🚨 NEEDS_MANUAL_REVIEW (unsupported payer) |
+| Olivia Bennett | Delta Dental | `E788123456` | ☎️ CALL_IN_PROGRESS → VERIFIED via AI voice call (mock: active) |
+| any patient | Delta / Guardian | ends in `0` / `9` / `5` | ☎️ mock: no answer / IVR dead end → Manual Review · inactive → COVERAGE_GAP_FLAGGED |
+| any patient | Principal Dental | any | 🚨 NEEDS_MANUAL_REVIEW (no EDI and no phone line on file) |
 
 ---
 
@@ -252,6 +293,11 @@ Settings → Verification Engine shows *Email delivery: on · smtp (smtp.gmail.c
 | POST | `/api/queue/purge` | Delete every job still queued/retrying (River task + domain row) |
 | GET | `/api/patients/{id}/pdf` | Download one patient's record as a PDF |
 | GET | `/api/reports/pdf` | Download the practice report as a PDF |
+| POST | `/api/payers/{id}/voice` | Set/clear a payer's AI call line + IVR notes |
+| GET | `/api/voice/agent-spec` | Prompt, tool schema and webhook URLs to configure the voice agent (`?baseUrl=`) |
+| POST | `/api/webhooks/bolna/facts` | Bolna custom function (mid-call facts) — Bearer `VOICE_WEBHOOK_SECRET` |
+| POST | `/api/webhooks/bolna/execution` | Bolna execution webhook (call ended) — `?token=VOICE_WEBHOOK_SECRET` |
+| POST | `/api/webhooks/voice/facts` · `/api/webhooks/voice` | Retell equivalents, `X-Retell-Signature` verified |
 
 ---
 

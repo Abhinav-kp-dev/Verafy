@@ -44,17 +44,17 @@ func (s *Store) DefaultPractice(ctx context.Context) (*Practice, error) {
 }
 
 func (s *Store) ListPayers(ctx context.Context) ([]Payer, error) {
-	rows, _ := s.Pool.Query(ctx, `SELECT id, name, stedi_payer_id, supports_realtime, service_type_code, plan_type FROM payers ORDER BY name`)
+	rows, _ := s.Pool.Query(ctx, `SELECT id, name, stedi_payer_id, supports_realtime, service_type_code, plan_type, provider_services_phone, ivr_notes FROM payers ORDER BY name`)
 	return pgx.CollectRows(rows, pgx.RowToStructByName[Payer])
 }
 
 func (s *Store) GetPayer(ctx context.Context, id uuid.UUID) (*Payer, error) {
-	rows, _ := s.Pool.Query(ctx, `SELECT id, name, stedi_payer_id, supports_realtime, service_type_code, plan_type FROM payers WHERE id=$1`, id)
+	rows, _ := s.Pool.Query(ctx, `SELECT id, name, stedi_payer_id, supports_realtime, service_type_code, plan_type, provider_services_phone, ivr_notes FROM payers WHERE id=$1`, id)
 	return pgx.CollectExactlyOneRow(rows, pgx.RowToAddrOfStructByName[Payer])
 }
 
 func (s *Store) FindPayerByStediID(ctx context.Context, stediID string) (*Payer, error) {
-	rows, _ := s.Pool.Query(ctx, `SELECT id, name, stedi_payer_id, supports_realtime, service_type_code, plan_type FROM payers WHERE stedi_payer_id=$1 LIMIT 1`, stediID)
+	rows, _ := s.Pool.Query(ctx, `SELECT id, name, stedi_payer_id, supports_realtime, service_type_code, plan_type, provider_services_phone, ivr_notes FROM payers WHERE stedi_payer_id=$1 LIMIT 1`, stediID)
 	return pgx.CollectExactlyOneRow(rows, pgx.RowToAddrOfStructByName[Payer])
 }
 
@@ -169,7 +169,9 @@ const jobSelect = `
 SELECT j.id, j.batch_id, j.patient_id, j.payer_id, j.status, j.attempt_count, j.next_attempt_at,
        j.raw_response, j.normalized_brief, j.review_reason, j.error_code, j.error_message,
        j.resolved_by, j.resolution_note, j.started_at, j.completed_at, j.resolved_at, j.created_at, j.updated_at,
-       p.name AS patient_name, p.dob AS patient_dob, p.member_id, py.name AS payer_name, py.stedi_payer_id
+       j.verification_source, j.call_id, j.call_transcript, j.call_started_at, j.call_completed_at,
+       p.name AS patient_name, p.dob AS patient_dob, p.member_id, py.name AS payer_name, py.stedi_payer_id,
+       py.provider_services_phone AS payer_phone
 FROM jobs j
 JOIN patients p ON p.id = j.patient_id
 JOIN payers py ON py.id = j.payer_id`
@@ -479,6 +481,107 @@ func (s *Store) RequeueFromReview(ctx context.Context, jobID uuid.UUID) error {
 	return tx.Commit(ctx)
 }
 
+// ---------- AI voice verification ----------
+
+// UpdatePayerVoice sets (or clears, with empty strings) the phone line the AI agent
+// dials for a payer that has no real-time EDI, plus free-text IVR hints.
+func (s *Store) UpdatePayerVoice(ctx context.Context, payerID uuid.UUID, phone, ivrNotes string) error {
+	tag, err := s.Pool.Exec(ctx, `UPDATE payers SET provider_services_phone=NULLIF($2,''), ivr_notes=NULLIF($3,'') WHERE id=$1`, payerID, phone, ivrNotes)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+// GetJobByCallID resolves a voice-platform call back to our job.
+func (s *Store) GetJobByCallID(ctx context.Context, callID string) (*Job, error) {
+	rows, _ := s.Pool.Query(ctx, jobSelect+` WHERE j.call_id=$1`, callID)
+	return pgx.CollectExactlyOneRow(rows, pgx.RowToAddrOfStructByName[Job])
+}
+
+// MarkCallInProgress: PROCESSING -> CALL_IN_PROGRESS once the outbound call is dispatched.
+func (s *Store) MarkCallInProgress(ctx context.Context, jobID uuid.UUID, callID string) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := transition(ctx, tx, jobID, StatusCallInProgress); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE jobs SET verification_source=$2, call_id=$3, call_started_at=now(), call_completed_at=NULL, call_transcript=NULL, error_code=NULL, error_message=NULL WHERE id=$1`,
+		jobID, SourceVoiceCall, callID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE job_attempts SET status='CALL_IN_PROGRESS' WHERE job_id=$1 AND attempt_number=(SELECT attempt_count FROM jobs WHERE id=$1)`, jobID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// MarkVoiceResult: CALL_IN_PROGRESS -> VERIFIED | COVERAGE_GAP_FLAGGED with the facts the
+// agent collected. Guarded: a late or duplicate webhook cannot overwrite a finished job.
+func (s *Store) MarkVoiceResult(ctx context.Context, jobID uuid.UUID, status JobStatus, raw, brief json.RawMessage, transcript string) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	old, err := transition(ctx, tx, jobID, status)
+	if err != nil {
+		return err
+	}
+	if old != StatusCallInProgress {
+		return fmt.Errorf("job is %s, not CALL_IN_PROGRESS", old)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE jobs SET raw_response=$2, normalized_brief=$3, call_transcript=NULLIF($4,''), call_completed_at=now(), completed_at=now(), error_code=NULL, error_message=NULL WHERE id=$1`,
+		jobID, raw, brief, transcript); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE job_attempts SET status=$2 WHERE job_id=$1 AND attempt_number=(SELECT attempt_count FROM jobs WHERE id=$1)`, jobID, string(status)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// MarkVoiceFailed: CALL_IN_PROGRESS -> NEEDS_MANUAL_REVIEW, keeping whatever transcript
+// exists so staff do not start from zero. Guarded like MarkVoiceResult.
+func (s *Store) MarkVoiceFailed(ctx context.Context, jobID uuid.UUID, reason ReviewReason, code, msg, transcript string) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	old, err := transition(ctx, tx, jobID, StatusNeedsReview)
+	if err != nil {
+		return err
+	}
+	if old != StatusCallInProgress {
+		return fmt.Errorf("job is %s, not CALL_IN_PROGRESS", old)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE jobs SET review_reason=$2, error_code=$3, error_message=$4, call_transcript=COALESCE(NULLIF($5,''), call_transcript), call_completed_at=now(), completed_at=now(), next_attempt_at=NULL WHERE id=$1`,
+		jobID, reason, nullIfEmpty(code), nullIfEmpty(msg), transcript); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE job_attempts SET status='NEEDS_MANUAL_REVIEW', error_code=$2, error_message=$3 WHERE job_id=$1 AND attempt_number=(SELECT attempt_count FROM jobs WHERE id=$1)`, jobID, nullIfEmpty(code), nullIfEmpty(msg)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// AttachCallTranscript stores the final transcript for a call whose job already
+// finished (the facts arrive mid-call; the full transcript arrives at call end).
+func (s *Store) AttachCallTranscript(ctx context.Context, callID, transcript string) error {
+	if transcript == "" {
+		return nil
+	}
+	_, err := s.Pool.Exec(ctx, `UPDATE jobs SET call_transcript=$2, call_completed_at=COALESCE(call_completed_at, now()) WHERE call_id=$1`, callID, transcript)
+	return err
+}
+
 func nullIfEmpty(s string) *string {
 	if s == "" {
 		return nil
@@ -489,18 +592,18 @@ func nullIfEmpty(s string) *string {
 // ---------- stats ----------
 
 type Stats struct {
-	Total          int                `json:"total"`
-	Verified       int                `json:"verified"`
-	GapFlagged     int                `json:"gapFlagged"`
-	InProgress     int                `json:"inProgress"`
-	NeedsReview    int                `json:"needsReview"`
-	ManualResolved int                `json:"manualResolved"`
-	SuccessRate    float64            `json:"successRate"`
-	AvgProcessSecs float64            `json:"avgProcessingSeconds"`
-	ByStatus       map[string]int     `json:"byStatus"`
-	ByPayer        []PayerCount       `json:"byPayer"`
-	Last7Days      []DayCount         `json:"last7Days"`
-	ReviewReasons  map[string]int     `json:"reviewReasons"`
+	Total          int            `json:"total"`
+	Verified       int            `json:"verified"`
+	GapFlagged     int            `json:"gapFlagged"`
+	InProgress     int            `json:"inProgress"`
+	NeedsReview    int            `json:"needsReview"`
+	ManualResolved int            `json:"manualResolved"`
+	SuccessRate    float64        `json:"successRate"`
+	AvgProcessSecs float64        `json:"avgProcessingSeconds"`
+	ByStatus       map[string]int `json:"byStatus"`
+	ByPayer        []PayerCount   `json:"byPayer"`
+	Last7Days      []DayCount     `json:"last7Days"`
+	ReviewReasons  map[string]int `json:"reviewReasons"`
 }
 
 type PayerCount struct {
@@ -533,7 +636,7 @@ func (s *Store) Stats(ctx context.Context) (*Stats, error) {
 	st.GapFlagged = st.ByStatus["COVERAGE_GAP_FLAGGED"]
 	st.NeedsReview = st.ByStatus["NEEDS_MANUAL_REVIEW"]
 	st.ManualResolved = st.ByStatus["MANUAL_RESOLVED"]
-	st.InProgress = st.ByStatus["QUEUED"] + st.ByStatus["PROCESSING"] + st.ByStatus["RETRYING"]
+	st.InProgress = st.ByStatus["QUEUED"] + st.ByStatus["PROCESSING"] + st.ByStatus["RETRYING"] + st.ByStatus["CALL_IN_PROGRESS"]
 	done := st.Verified + st.GapFlagged + st.NeedsReview + st.ManualResolved
 	if done > 0 {
 		st.SuccessRate = float64(st.Verified+st.GapFlagged+st.ManualResolved) / float64(done) * 100

@@ -17,6 +17,12 @@ const (
 	StatusRetrying      JobStatus = "RETRYING"
 	StatusNeedsReview   JobStatus = "NEEDS_MANUAL_REVIEW"
 	StatusManualResolve JobStatus = "MANUAL_RESOLVED"
+	StatusCallInProgress JobStatus = "CALL_IN_PROGRESS" // AI voice agent is on the phone with the payer
+)
+
+const (
+	SourceStedi     = "stedi_270_271"
+	SourceVoiceCall = "ai_voice_call"
 )
 
 // batchColumn maps a status to its denormalized counter column on batches.
@@ -29,6 +35,9 @@ var batchColumn = map[JobStatus]string{
 	StatusRetrying:      "retrying",
 	StatusNeedsReview:   "needs_review",
 	StatusManualResolve: "manual_resolved",
+	// A call in flight is still "processing" from the batch's point of view; sharing the
+	// column keeps counters exact without a schema change (PROCESSING -> CALL_IN_PROGRESS is a no-op).
+	StatusCallInProgress: "processing",
 }
 
 type ReviewReason string
@@ -39,6 +48,8 @@ const (
 	ReasonRetryExhausted    ReviewReason = "retry_exhausted"
 	ReasonMalformedResponse ReviewReason = "malformed_response"
 	ReasonPayerRejected     ReviewReason = "payer_rejected"
+	ReasonVoiceCallFailed   ReviewReason = "voice_call_failed"
+	ReasonCallTimeout       ReviewReason = "call_timeout"
 )
 
 type Practice struct {
@@ -53,6 +64,14 @@ type Payer struct {
 	SupportsRealtime bool      `db:"supports_realtime" json:"supportsRealtime"`
 	ServiceTypeCode  string    `db:"service_type_code" json:"serviceTypeCode"`
 	PlanType         string    `db:"plan_type" json:"planType"`
+	// Voice path for payers without real-time EDI. NULL phone = plain manual review.
+	ProviderServicesPhone *string `db:"provider_services_phone" json:"providerServicesPhone,omitempty"`
+	IVRNotes              *string `db:"ivr_notes" json:"ivrNotes,omitempty"`
+}
+
+// VoiceEnabled reports whether this payer can be verified by an AI phone call.
+func (p *Payer) VoiceEnabled() bool {
+	return p.ProviderServicesPhone != nil && *p.ProviderServicesPhone != ""
 }
 
 type Patient struct {
@@ -109,12 +128,19 @@ type Job struct {
 	ResolvedAt      *time.Time      `db:"resolved_at" json:"resolvedAt,omitempty"`
 	CreatedAt       time.Time       `db:"created_at" json:"createdAt"`
 	UpdatedAt       time.Time       `db:"updated_at" json:"updatedAt"`
+	// AI voice verification
+	VerificationSource string     `db:"verification_source" json:"verificationSource"`
+	CallID             *string    `db:"call_id" json:"callId,omitempty"`
+	CallTranscript     *string    `db:"call_transcript" json:"callTranscript,omitempty"`
+	CallStartedAt      *time.Time `db:"call_started_at" json:"callStartedAt,omitempty"`
+	CallCompletedAt    *time.Time `db:"call_completed_at" json:"callCompletedAt,omitempty"`
 	// joined
 	PatientName  string    `db:"patient_name" json:"patientName"`
 	PatientDOB   time.Time `db:"patient_dob" json:"patientDob"`
 	MemberID     string    `db:"member_id" json:"memberId"`
 	PayerName    string    `db:"payer_name" json:"payerName"`
 	StediPayerID string    `db:"stedi_payer_id" json:"stediPayerId"`
+	PayerPhone   *string   `db:"payer_phone" json:"payerPhone,omitempty"`
 }
 
 type JobAttempt struct {

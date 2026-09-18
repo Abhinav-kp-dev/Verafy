@@ -214,6 +214,7 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .drawer-body { padding: 24px; display: flex; flex-direction: column; gap: 20px; }
 pre.raw { background: var(--ink); color: #E2E8F0; padding: 14px; border-radius: 10px; font-size: 12px; overflow: auto; max-height: 360px; margin: 0; }
 .x { background: none; border: 0; font-size: 20px; color: var(--muted); }
+pre.raw.transcript { white-space: pre-wrap; font-family: inherit; font-size: 13px; line-height: 1.6; max-height: 420px; }
 
 .cov-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .cov { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
