@@ -1,0 +1,60 @@
+# ── Secrets & environment ────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ── Go ────────────────────────────────────────────────────────────────────────
+backend/bin/
+backend/coveragecheck
+backend/tmp/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# ── Node / frontend ───────────────────────────────────────────────────────────
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+dist/
+.npm
+*.tsbuildinfo
+
+# ── OS artifacts ──────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ── Editor / IDE ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+.claude/
+
+# ── Logs & debug ──────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Build artifacts ───────────────────────────────────────────────────────────
+*.tar.gz
+*.zip
+coverage/
