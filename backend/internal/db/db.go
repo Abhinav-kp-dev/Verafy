@@ -207,6 +207,20 @@ func (s *Store) ListJobs(ctx context.Context, f JobFilter) ([]Job, int, error) {
 	return jobs, total, err
 }
 
+// JobIDsByStatuses returns every job id in any of the given statuses, uncapped —
+// for admin bulk operations (e.g. purging a stale batch), never for a UI list.
+func (s *Store) JobIDsByStatuses(ctx context.Context, statuses ...JobStatus) ([]uuid.UUID, error) {
+	if len(statuses) == 0 {
+		return nil, nil
+	}
+	strs := make([]string, len(statuses))
+	for i, st := range statuses {
+		strs[i] = string(st)
+	}
+	rows, _ := s.Pool.Query(ctx, `SELECT id FROM jobs WHERE status::text = ANY($1)`, strs)
+	return pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+}
+
 func (s *Store) ListAttempts(ctx context.Context, jobID uuid.UUID) ([]JobAttempt, error) {
 	rows, _ := s.Pool.Query(ctx, `SELECT id, job_id, attempt_number, status, error_code, error_message, attempted_at FROM job_attempts WHERE job_id=$1 ORDER BY attempt_number`, jobID)
 	return pgx.CollectRows(rows, pgx.RowToStructByName[JobAttempt])

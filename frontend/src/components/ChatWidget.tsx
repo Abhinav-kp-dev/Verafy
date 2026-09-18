@@ -4,7 +4,7 @@ import { Icon } from './ui'
 
 const GREETING: ChatMessage = {
   role: 'assistant',
-  text: "Hi! I can answer questions about your patients, verifications, manual review, or how to use CoverageCheck. Try \"what's in manual review right now?\" or \"how much does Falcon Dent owe for tomorrow's visit?\"",
+  text: "Hi! I can answer questions about your patients, verifications, manual review, or how to use Verafy. Try \"what's in manual review right now?\" or \"how much does Falcon Dent owe for tomorrow's visit?\"",
 }
 
 export function ChatWidget() {
@@ -45,7 +45,7 @@ export function ChatWidget() {
         <div className="chat-panel">
           <div className="chat-head">
             <div className="chat-avatar"><Icon name="tooth" size={16} /></div>
-            <div><b>CoverageCheck Assistant</b><div className="cell-sub">{enabled === false ? 'Not configured' : 'Read-only · looks up real data'}</div></div>
+            <div><b>Verafy Assistant</b><div className="cell-sub">{enabled === false ? 'Not configured' : 'Read-only · looks up real data'}</div></div>
             <button className="x" onClick={() => setOpen(false)} aria-label="Close">×</button>
           </div>
 

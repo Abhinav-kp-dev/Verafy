@@ -4,7 +4,7 @@ export function EstimateCard({ e, compact = false }: { e: Estimate; compact?: bo
   const inactive = e.eligibilityStatus !== 'active'
   return (
     <div className="card" style={{ overflow: 'hidden' }}>
-      <div className="card-head" style={{ background: '#FAFBFC' }}>
+      <div className="card-head" style={{ background: 'var(--surface-alt)' }}>
         <div><h3>Pre-visit cost estimate</h3><div className="cell-sub">{e.planName ? `${e.planName} · ` : ''}deductible first → coinsurance → annual maximum</div></div>
         {inactive
           ? <span className="badge tone-error"><span className="dot" />Coverage not active</span>
@@ -18,12 +18,12 @@ export function EstimateCard({ e, compact = false }: { e: Estimate; compact?: bo
               <tr key={i}>
                 <td>
                   <div className="cell-main"><span className="num" style={{ color: 'var(--muted)', marginRight: 8 }}>{li.code}</span>{li.description}</div>
-                  <div className="cell-sub">{li.covered && li.planPaysPct != null ? `${li.category} · plan pays ${li.planPaysPct}%` : (li.note ?? 'Not covered')}{li.overAnnualMaxCents > 0 && <span style={{ color: '#B45309' }}> · {money(li.overAnnualMaxCents)} over annual max</span>}</div>
+                  <div className="cell-sub">{li.covered && li.planPaysPct != null ? `${li.category} · plan pays ${li.planPaysPct}%` : (li.note ?? 'Not covered')}{li.overAnnualMaxCents > 0 && <span style={{ color: 'var(--warning-text)' }}> · {money(li.overAnnualMaxCents)} over annual max</span>}</div>
                 </td>
                 <td className="num" style={{ textAlign: 'right' }}>{money(li.feeCents)}</td>
                 {!compact && <td className="num" style={{ textAlign: 'right' }}>{li.deductibleAppliedCents ? money(li.deductibleAppliedCents) : '—'}</td>}
                 <td className="num" style={{ textAlign: 'right' }}>{money(li.insurancePaysCents)}</td>
-                <td className="num" style={{ textAlign: 'right', fontWeight: 600, color: li.covered ? 'inherit' : '#B91C1C' }}>{money(li.patientPaysCents)}</td>
+                <td className="num" style={{ textAlign: 'right', fontWeight: 600, color: li.covered ? 'inherit' : 'var(--error-text)' }}>{money(li.patientPaysCents)}</td>
               </tr>
             ))}
           </tbody>
@@ -32,7 +32,7 @@ export function EstimateCard({ e, compact = false }: { e: Estimate; compact?: bo
       <div className="card-pad" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, borderTop: '1px solid var(--border)' }}>
         <div className="cov"><span>Total fees</span><b className="num">{money(e.totalFeeCents)}</b></div>
         <div className="cov"><span>Insurance expected to pay</span><b className="num">{money(e.insurancePaysCents)}</b>{e.annualMaximumCents != null && <span>of {money(e.annualMaximumCents)} annual max</span>}</div>
-        <div className="cov" style={{ background: 'var(--green-50)', borderColor: 'var(--green-300)' }}><span>Patient's estimated share</span><b className="num" style={{ color: 'var(--green-900)', fontSize: 22 }}>{money(e.patientPaysCents)}</b>{e.deductibleRemainingStartCents != null && e.deductibleRemainingStartCents > 0 && <span>includes {money(e.deductibleUsedCents)} deductible</span>}</div>
+        <div className="cov" style={{ background: 'var(--green-50)', borderColor: 'var(--green-300)' }}><span>Patient's estimated share</span><b className="num" style={{ color: 'var(--accent)', fontSize: 22 }}>{money(e.patientPaysCents)}</b>{e.deductibleRemainingStartCents != null && e.deductibleRemainingStartCents > 0 && <span>includes {money(e.deductibleUsedCents)} deductible</span>}</div>
       </div>
       {!compact && <div className="card-pad" style={{ paddingTop: 0 }}><p className="help" style={{ margin: 0 }}>{e.disclaimer}</p></div>}
     </div>

@@ -167,7 +167,18 @@ export const api = {
   deletePatients: (ids: string[]) => req<{ deleted: number }>('/api/patients', { method: 'DELETE', body: JSON.stringify({ ids }) }),
   deleteNotices: (ids: string[]) => req<{ deleted: number }>('/api/notices', { method: 'DELETE', body: JSON.stringify({ ids }) }),
   chat: (messages: ChatMessage[]) => req<ChatReply>('/api/chat', { method: 'POST', body: JSON.stringify({ messages }) }),
+  queueStatus: () => req<QueueStatus>('/api/queue/status'),
+  queuePause: () => req<QueueStatus>('/api/queue/pause', { method: 'POST' }),
+  queueResume: () => req<QueueStatus>('/api/queue/resume', { method: 'POST' }),
+  queuePurge: () => req<{ purged: number }>('/api/queue/purge', { method: 'POST' }),
+  notifications: () => req<Notification[]>('/api/notifications'),
+  patientPdfUrl: (id: string) => `${API}/api/patients/${id}/pdf`,
+  reportPdfUrl: () => `${API}/api/reports/pdf`,
 }
+
+export interface QueueStatus { paused: boolean; pausedAt?: string }
+
+export interface Notification { id: string; kind: string; title: string; detail: string; createdAt: string; link: string }
 
 export interface ChatMessage { role: 'user' | 'assistant'; text: string }
 export interface ChatReply { text: string; toolsUsed?: string[] }

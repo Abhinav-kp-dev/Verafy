@@ -211,7 +211,7 @@ type ResendSender struct {
 
 func NewResend(apiKey, from string) *ResendSender {
 	if from == "" {
-		from = "CoverageCheck <onboarding@resend.dev>"
+		from = "Verafy <onboarding@resend.dev>"
 	}
 	return &ResendSender{APIKey: apiKey, From: from, http: &http.Client{Timeout: 15 * time.Second}}
 }

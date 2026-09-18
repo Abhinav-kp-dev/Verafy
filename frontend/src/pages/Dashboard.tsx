@@ -112,7 +112,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      <div className="footer-note"><span>"Technology should make care simpler, not harder."</span><span>CoverageCheck · Built for healthier smiles · DSOLVE 2026</span></div>
+      <div className="footer-note"><span>"Technology should make care simpler, not harder."</span><span>Verafy · Built for healthier smiles · DSOLVE 2026</span></div>
 
       {open && <Drawer title="Verification detail" onClose={() => setOpen(null)}><JobDetail jobId={open} /></Drawer>}
     </div>

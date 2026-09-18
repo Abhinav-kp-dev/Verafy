@@ -70,7 +70,7 @@ export function Patients() {
               {list.map((p) => (
                 <tr key={p.id} className={sel.selected.has(p.id) ? 'selected-row' : ''}>
                   <td className="rowcheck"><input type="checkbox" checked={sel.selected.has(p.id)} onChange={() => sel.toggle(p.id)} /></td>
-                  <td><div className="cell-main">{p.name}</div><div className="cell-sub">{p.email ?? <span style={{ color: '#B45309' }}>no email — notices won't be sent</span>}</div></td>
+                  <td><div className="cell-main">{p.name}</div><div className="cell-sub">{p.email ?? <span style={{ color: 'var(--warning-text)' }}>no email — notices won't be sent</span>}</div></td>
                   <td className="num">{fmtDOB(p.dob)}</td>
                   <td className="num">{p.memberId}</td>
                   <td><div>{p.payerName}</div><div className="cell-sub">{p.stediPayerId}</div></td>
@@ -79,6 +79,7 @@ export function Patients() {
                     <button className="btn btn-ghost btn-sm" onClick={() => verify(p)}>Verify</button>{' '}
                     <button className="btn btn-ghost btn-sm" onClick={() => { setEditing(p); setContact({ email: p.email ?? '', phone: p.phone ?? '' }) }}>Edit contact</button>{' '}
                     <button className="btn btn-ghost btn-sm" onClick={() => nav(`/history?search=${encodeURIComponent(p.memberId)}`)}>History</button>{' '}
+                    <a className="btn btn-ghost btn-sm" href={api.patientPdfUrl(p.id)} title="Download patient record as PDF"><Icon name="download" size={13} /> PDF</a>{' '}
                     <button className="btn btn-danger btn-sm" disabled={deletingIds.has(p.id)} onClick={() => deleteOne(p)} title="Delete patient"><Icon name="trash" size={13} /></button>
                   </td>
                 </tr>

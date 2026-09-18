@@ -83,6 +83,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/events", s.hub)
 	s.registerPrevisitRoutes(mux)
 	s.registerChatRoutes(mux)
+	s.registerControlRoutes(mux)
+	s.registerPDFRoutes(mux)
+	s.registerNotificationRoutes(mux)
 	return s.cors(s.inboundLimit(mux))
 }
 

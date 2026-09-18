@@ -94,7 +94,7 @@ func main() {
 	httpSrv := &http.Server{Addr: ":" + cfg.Port, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 
 	go func() {
-		log.Info("CoverageCheck API listening", "port", cfg.Port, "stedi", client.Mode(), "llm", gen.Enabled(), "workers", cfg.MaxWorkers, "payerRPS", cfg.PayerRPS)
+		log.Info("Verafy API listening", "port", cfg.Port, "stedi", client.Mode(), "llm", gen.Enabled(), "workers", cfg.MaxWorkers, "payerRPS", cfg.PayerRPS)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("http", "err", err)
 			stop()

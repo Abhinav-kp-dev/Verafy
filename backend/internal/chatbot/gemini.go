@@ -1,5 +1,5 @@
 // Package chatbot implements the in-app assistant: a Gemini-backed chat endpoint
-// with function calling into CoverageCheck's own data (patients, verifications,
+// with function calling into Verafy's own data (patients, verifications,
 // manual review, stats) so it can answer real questions, not just app-usage FAQs.
 //
 // REST contract verified against Google's own function-calling cookbook example

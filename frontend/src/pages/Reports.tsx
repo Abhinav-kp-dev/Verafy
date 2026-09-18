@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { api, type Stats } from '../api'
 import { useLiveRefresh } from '../live'
-import { StatCard } from '../components/ui'
+import { Icon, StatCard } from '../components/ui'
 
 const SEG = [
-  ['verified', 'Verified', 'var(--green-500)'], ['manualResolved', 'Manually verified', 'var(--green-900)'], ['gapFlagged', 'Coverage gap', 'var(--amber)'],
+  ['verified', 'Verified', 'var(--green-500)'], ['manualResolved', 'Manually verified', 'var(--accent)'], ['gapFlagged', 'Coverage gap', 'var(--amber)'],
   ['needsReview', 'Needs review', 'var(--red)'], ['inProgress', 'In progress', 'var(--blue)'],
 ] as const
 
@@ -21,7 +21,7 @@ export function Reports() {
 
   return (
     <div className="page">
-      <div className="page-head"><div><h1>Reports &amp; Analytics</h1><p>Gain insights into your verification activity</p></div></div>
+      <div className="page-head"><div><h1>Reports &amp; Analytics</h1><p>Gain insights into your verification activity</p></div><a className="btn btn-outline" href={api.reportPdfUrl()}><Icon name="download" size={15} /> Download PDF</a></div>
       <div className="grid grid-4">
         <StatCard icon="doc" tone="success" value={s.total.toLocaleString()} label="Total Verifications" />
         <StatCard icon="shield" tone="info" value={`${s.successRate.toFixed(0)}%`} label="Automated success rate" sub="verified or gap-flagged without a human" />

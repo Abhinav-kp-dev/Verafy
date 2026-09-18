@@ -106,7 +106,7 @@ export function PreVisit() {
                 return (
                   <tr key={a.id}>
                     <td className="num">{fmtTime(a.scheduledAt)}</td>
-                    <td><div className="cell-main">{a.patientName}</div><div className="cell-sub">{a.payerName}{a.patientEmail ? ` · ${a.patientEmail}` : <span style={{ color: '#B45309' }}> · no email</span>}</div></td>
+                    <td><div className="cell-main">{a.patientName}</div><div className="cell-sub">{a.payerName}{a.patientEmail ? ` · ${a.patientEmail}` : <span style={{ color: 'var(--warning-text)' }}> · no email</span>}</div></td>
                     <td><div className="num">{a.procedureCodes.join(', ')}</div>{a.notes && <div className="cell-sub">{a.notes}</div>}</td>
                     <td>{a.jobStatus ? <span className="clickable" onClick={() => a.jobId && setOpenJob(a.jobId)}><StatusBadge status={a.jobStatus} /></span> : <span className="cell-sub">Not run</span>}</td>
                     <td className="num" style={{ fontWeight: 600 }}>{n ? money(n.estimate.patientPaysCents) : '—'}</td>
@@ -185,7 +185,7 @@ function NoticeDrawer({ n: initial, onClose, onOpenJob }: { n: PatientNotice; on
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <div>
           <div className="cell-main" style={{ fontSize: 15 }}>{n.subject}</div>
-          <div className="cell-sub">To: {n.recipient ?? <span style={{ color: '#B45309' }}>no email on file</span>} · {n.payerName}{n.scheduledAt && ` · visit ${fmtDate(n.scheduledAt)} ${fmtTime(n.scheduledAt)}`}</div>
+          <div className="cell-sub">To: {n.recipient ?? <span style={{ color: 'var(--warning-text)' }}>no email on file</span>} · {n.payerName}{n.scheduledAt && ` · visit ${fmtDate(n.scheduledAt)} ${fmtTime(n.scheduledAt)}`}</div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span className={`badge tone-${meta?.tone ?? 'neutral'}`}><span className="dot" />{meta?.label ?? n.deliveryStatus}</span>
@@ -202,9 +202,9 @@ function NoticeDrawer({ n: initial, onClose, onOpenJob }: { n: PatientNotice; on
         <button className={tab === 'estimate' ? 'active' : ''} onClick={() => setTab('estimate')}>Estimate breakdown</button>
         <button className={tab === 'text' ? 'active' : ''} onClick={() => setTab('text')}>Plain text</button>
       </div>
-      {tab === 'email' && <iframe title="Email preview" src={api.noticePreviewUrl(n.id)} style={{ width: '100%', height: 620, border: '1px solid var(--border)', borderRadius: 10, background: '#F8FAFC' }} />}
+      {tab === 'email' && <iframe title="Email preview" src={api.noticePreviewUrl(n.id)} style={{ width: '100%', height: 620, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface-alt)' }} />}
       {tab === 'estimate' && <EstimateCard e={n.estimate} />}
-      {tab === 'text' && <pre className="raw" style={{ background: '#FAFBFC', color: 'var(--text)', whiteSpace: 'pre-wrap' }}>{n.bodyText}</pre>}
+      {tab === 'text' && <pre className="raw" style={{ background: 'var(--surface-alt)', color: 'var(--text)', whiteSpace: 'pre-wrap' }}>{n.bodyText}</pre>}
       <div><button className="link" onClick={() => onOpenJob(n.jobId)}>Open the verification this estimate is based on →</button></div>
     </Drawer>
   )

@@ -17,6 +17,10 @@ Verafy is a full-stack insurance eligibility verification platform built for den
 - 📊 **Live dashboard** — Postgres `LISTEN/NOTIFY` → coalesced SSE → real-time job counters, batch progress, rate-limit state
 - 🤖 **AI brief** — Gemini-powered plain-English coverage summary with post-hoc numeric validation; falls back to a deterministic template on any mismatch
 - 📬 **Pre-visit cost notices** — estimates patient out-of-pocket share (deductible → coinsurance → annual max) and emails it before the appointment
+- 🔔 **Live notification center** — derived entirely from real state (new manual-review cases, failed email deliveries, a paused queue) — never a fabricated event
+- ⏯️ **Queue control** — pause/resume the verification queue and purge everything still waiting, from one toggle in the topbar
+- 📄 **PDF export** — download a single patient's record or the full practice report as a print-ready PDF, generated server-side
+- 🌗 **Dark / light theme** — full token-based theming with a one-click toggle, persisted per browser and defaulting to OS preference
 - 🔬 **Synthetic load test** — enqueue 10,000 jobs from the UI or CLI to prove throughput
 
 ---
@@ -61,8 +65,8 @@ backend/
   cmd/seedprevisit  fee schedule + tomorrow's appointments
   cmd/reset         wipe jobs/batches before a demo (keeps patients)
   cmd/loadtest      synthetic load runner with live counters
-  internal/api      HTTP handlers, CORS, inbound rate limit
-  internal/queue    River worker (state machine) + retry logic
+  internal/api      HTTP handlers, CORS, inbound rate limit, notifications, PDF routes
+  internal/queue    River worker (state machine) + retry logic + pause/resume/purge control
   internal/stedi    X12 270/271 live client + mock simulator
   internal/normalize  271 → typed Facts field mapper (no AI)
   internal/llm      Gemini brief writer + numeric validation + template fallback
@@ -72,11 +76,13 @@ backend/
   internal/db       pgx store; atomic status transitions + batch counters
   internal/estimate deductible → coinsurance → annual-max math, unit-tested
   internal/notify   email rendering (HTML + text) + SMTP delivery
+  internal/pdfreport  patient record + practice report PDF rendering (fpdf)
   migrations/       versioned SQL migrations
 
 frontend/           React 19 + Vite + TypeScript
   Dashboard, Verify, Batch Upload, Patients, History,
   Manual Review, Pre-Visit Notices, Reports, Settings
+  Notification center, queue control toggle, dark/light theme — all in the shared topbar
 ```
 
 **Stack:** Go 1.22+ · [River](https://riverqueue.com) (Postgres-backed queue, no Redis) · pgx · `golang.org/x/time/rate` · SSE · React 19 · Vite · TypeScript
@@ -92,7 +98,7 @@ frontend/           React 19 + Vite + TypeScript
 ```bash
 # Homebrew (macOS)
 brew install postgresql@17 && brew services start postgresql@17
-createdb coveragecheck
+createdb verafy
 
 # or Docker
 docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=dev postgres:16
@@ -239,6 +245,13 @@ Settings → Verification Engine shows *Email delivery: on · smtp (smtp.gmail.c
 | GET | `/api/config` | Engine configuration |
 | GET | `/api/payers` | Payer directory |
 | GET | `/api/patients` | Patient list |
+| GET | `/api/notifications` | Live notification feed (manual review, delivery failures, queue state) |
+| GET | `/api/queue/status` | Current pause state of the verification queue |
+| POST | `/api/queue/pause` | Pause the queue — in-flight jobs finish, no new work starts |
+| POST | `/api/queue/resume` | Resume a paused queue |
+| POST | `/api/queue/purge` | Delete every job still queued/retrying (River task + domain row) |
+| GET | `/api/patients/{id}/pdf` | Download one patient's record as a PDF |
+| GET | `/api/reports/pdf` | Download the practice report as a PDF |
 
 ---
 

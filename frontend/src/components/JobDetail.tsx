@@ -68,7 +68,7 @@ export function JobDetail({ jobId, onResolved }: { jobId: string; onResolved?: (
       )}
 
       {b && job.status !== 'MANUAL_RESOLVED' && (
-        <div className="card card-pad" style={{ background: '#FAFBFC' }}>
+        <div className="card card-pad" style={{ background: 'var(--surface-alt)' }}>
           <div className="cell-sub" style={{ marginBottom: 6 }}>Coverage brief · {b.source === 'llm' ? `AI-written (${b.model}) — ${b.validation}` : b.source === 'template_fallback' ? `template (model output ${b.validation})` : 'deterministic template'}</div>
           <div style={{ fontSize: 15, lineHeight: 1.6 }}>{b.brief}</div>
         </div>
@@ -77,7 +77,7 @@ export function JobDetail({ jobId, onResolved }: { jobId: string; onResolved?: (
       {f && (
         <>
           <div className="grid grid-3">
-            <div className="cov"><span>Eligibility</span><b style={{ color: f.eligibilityStatus === 'active' ? 'var(--green-900)' : 'var(--red)' }}>{f.eligibilityStatus.toUpperCase()}</b><span>{f.planName || f.insuranceType || ''}</span></div>
+            <div className="cov"><span>Eligibility</span><b style={{ color: f.eligibilityStatus === 'active' ? 'var(--accent)' : 'var(--red)' }}>{f.eligibilityStatus.toUpperCase()}</b><span>{f.planName || f.insuranceType || ''}</span></div>
             <div className="cov"><span>Deductible remaining</span><b className="num">{f.deductibleRemaining == null ? '—' : `$${f.deductibleRemaining}`}</b><span>{f.deductibleAnnual != null ? `of $${f.deductibleAnnual} annual` : ''}</span></div>
             <div className="cov"><span>Annual maximum</span><b className="num">{f.annualMaximum == null ? '—' : `$${f.annualMaximum}`}</b><span>{f.planStart ? `Plan ${f.planStart} → ${f.planEnd || 'open'}` : ''}</span></div>
           </div>

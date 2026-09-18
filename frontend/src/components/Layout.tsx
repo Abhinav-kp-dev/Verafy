@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { useLive, useLiveRefresh } from '../live'
 import { ChatWidget } from './ChatWidget'
-import { Icon } from './ui'
+import { Icon, NotificationBell, QueueToggle, ThemeToggle } from './ui'
 
 export function Layout() {
   const { connected } = useLive()
@@ -28,7 +28,7 @@ export function Layout() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark"><Icon name="tooth" size={20} /></div>
-          <div><div className="brand-name">Coverage<span>Check</span></div><div className="brand-tag">Verify. Understand. Care Ahead.</div></div>
+          <div><div className="brand-name">Ver<span>afy</span></div><div className="brand-tag">Verify. Understand. Care Ahead.</div></div>
         </div>
         <nav className="nav">
           {items.map(([to, icon, label]) => (
@@ -52,7 +52,9 @@ export function Layout() {
           </form>
           <div className="topbar-right">
             <div className="live-pill"><span className={`live-dot ${connected ? 'on' : ''}`} />{connected ? 'Live' : 'Reconnecting…'}</div>
-            <Icon name="bell" />
+            <QueueToggle />
+            <ThemeToggle />
+            <NotificationBell />
             <div className="user"><div className="avatar">SL</div><div><b>Dr. Sarah Lee</b><small>Riverside Dental Care</small></div></div>
           </div>
         </header>

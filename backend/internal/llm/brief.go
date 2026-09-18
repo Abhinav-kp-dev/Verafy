@@ -149,7 +149,7 @@ func (g *Generator) callModel(ctx context.Context, f *normalize.Facts) (*Brief, 
 	req.Header.Set("Authorization", "Bearer "+g.APIKey)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("HTTP-Referer", "https://coveragecheck.local")
-	req.Header.Set("X-Title", "CoverageCheck")
+	req.Header.Set("X-Title", "Verafy")
 	resp, err := g.http.Do(req)
 	if err != nil {
 		return nil, err

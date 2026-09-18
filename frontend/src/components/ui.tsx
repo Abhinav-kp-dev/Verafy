@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { STATUS_META, type Batch, type Job, type JobStatus } from '../api'
-import { useLive } from '../live'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { api, fmtDate, fmtTime, STATUS_META, type Batch, type Job, type JobStatus, type Notification, type QueueStatus } from '../api'
+import { useLive, useLiveRefresh } from '../live'
 
 export function StatusBadge({ status, job }: { status: JobStatus; job?: Job }) {
   const m = STATUS_META[status]
@@ -46,6 +47,9 @@ export function Icon({ name, size = 18 }: { name: string; size?: number }) {
     case 'chat': return <svg {...p}><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" /></svg>
     case 'close': return <svg {...p}><path d="M18 6 6 18M6 6l12 12" /></svg>
     case 'send': return <svg {...p}><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg>
+    case 'pause': return <svg {...p}><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
+    case 'play': return <svg {...p} fill="currentColor" strokeWidth={0}><path d="M7 4l13 8-13 8z" /></svg>
+    case 'download': return <svg {...p}><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M4 21h16" /></svg>
     default: return null
   }
 }
@@ -54,7 +58,7 @@ export function StatCard({ icon, tone, value, label, sub, alert }: { icon: strin
   return (
     <div className={`card stat ${alert ? 'alert' : ''}`}>
       <div className={`ico tone-${tone}`}><Icon name={icon} size={20} /></div>
-      <div><b className="num">{value}</b><span>{label}</span>{sub && <small className={alert ? 'tone-error' : ''} style={{ background: 'none', color: alert ? 'var(--red)' : 'var(--green-900)' }}>{sub}</small>}</div>
+      <div><b className="num">{value}</b><span>{label}</span>{sub && <small className={alert ? 'tone-error' : ''} style={{ background: 'none', color: alert ? 'var(--red)' : 'var(--accent)' }}>{sub}</small>}</div>
     </div>
   )
 }
@@ -116,6 +120,125 @@ export function SelectionBar({ count, allSelected, onToggleAll, onClear, onDelet
         </>
       )}
     </div>
+  )
+}
+
+export function ThemeToggle() {
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => (document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'))
+
+  const toggle = () => {
+    const next = theme === 'dark' ? 'light' : 'dark'
+    setTheme(next)
+    document.documentElement.setAttribute('data-theme', next)
+    try { localStorage.setItem('verafy-theme', next) } catch { /* ignore */ }
+  }
+
+  return (
+    <button className="theme-toggle" onClick={toggle} aria-label="Toggle dark mode" title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
+      {theme === 'dark' ? (
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="4.5" /><path d="M12 2.5v2M12 19.5v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2.5 12h2M19.5 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" />
+        </svg>
+      ) : (
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+          <path d="M20.7 14.9A8.5 8.5 0 0 1 9.1 3.3a.5.5 0 0 0-.6-.7A10 10 0 1 0 21.4 15.5a.5.5 0 0 0-.7-.6z" />
+        </svg>
+      )}
+    </button>
+  )
+}
+
+const NOTIF_KIND_ICON: Record<string, string> = { manual_review: 'alert', delivery_failed: 'mail', queue_paused: 'pause' }
+
+export function NotificationBell() {
+  const nav = useNavigate()
+  const [items, setItems] = useState<Notification[]>([])
+  const [open, setOpen] = useState(false)
+  const [lastSeen, setLastSeen] = useState(() => { try { return localStorage.getItem('verafy-notif-last-seen') ?? '' } catch { return '' } })
+  const ref = useRef<HTMLDivElement>(null)
+
+  const load = () => { api.notifications().then(setItems).catch(() => {}) }
+  useLiveRefresh(load, [], 800)
+  useEffect(() => { const t = setInterval(load, 30000); return () => clearInterval(t) }, [])
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
+
+  const unread = items.filter((n) => n.createdAt > lastSeen).length
+
+  const toggle = () => {
+    setOpen((o) => {
+      const next = !o
+      if (next && items[0]) {
+        try { localStorage.setItem('verafy-notif-last-seen', items[0].createdAt) } catch { /* ignore */ }
+        setLastSeen(items[0].createdAt)
+      }
+      return next
+    })
+  }
+
+  return (
+    <div className="notif" ref={ref}>
+      <button className="notif-bell" onClick={toggle} aria-label="Notifications">
+        <Icon name="bell" />
+        {unread > 0 && <span className="notif-dot num">{unread > 9 ? '9+' : unread}</span>}
+      </button>
+      {open && (
+        <div className="notif-panel">
+          <div className="notif-panel-head">Notifications</div>
+          {items.length === 0 ? (
+            <div className="notif-empty">You're all caught up.</div>
+          ) : (
+            <div className="notif-list">
+              {items.map((n) => (
+                <button key={n.id} className="notif-item" onClick={() => { setOpen(false); nav(n.link) }}>
+                  <span className={`ico tone-${n.kind === 'delivery_failed' ? 'error' : n.kind === 'queue_paused' ? 'warning' : 'info'}`}>
+                    <Icon name={NOTIF_KIND_ICON[n.kind] ?? 'bell'} size={14} />
+                  </span>
+                  <span className="notif-item-body">
+                    <b>{n.title}</b>
+                    <span>{n.detail}</span>
+                    <small>{fmtDate(n.createdAt)} · {fmtTime(n.createdAt)}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function QueueToggle() {
+  const [status, setStatus] = useState<QueueStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const load = () => { api.queueStatus().then(setStatus).catch(() => {}) }
+  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t) }, [])
+
+  const toggle = async () => {
+    if (!status || busy) return
+    setBusy(true)
+    try {
+      const next = status.paused ? await api.queueResume() : await api.queuePause()
+      setStatus(next)
+    } finally { setBusy(false) }
+  }
+
+  if (!status) return null
+  return (
+    <button
+      className={`queue-toggle ${status.paused ? 'paused' : ''}`}
+      onClick={toggle}
+      disabled={busy}
+      title={status.paused ? 'Resume the verification queue' : 'Pause the verification queue'}
+    >
+      <Icon name={status.paused ? 'play' : 'pause'} size={13} />
+      {status.paused ? 'Queue Paused' : 'Queue Running'}
+    </button>
   )
 }
 
