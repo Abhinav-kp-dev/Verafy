@@ -30,7 +30,9 @@ export function JobDetail({ jobId, onResolved }: { jobId: string; onResolved?: (
   const b = job.normalizedBrief
   const f = b?.facts
   const byVoice = job.verificationSource === 'ai_voice_call'
+  const byEmail = job.verificationSource === 'email_form'
   const voiceReason = job.reviewReason === 'voice_call_failed' || job.reviewReason === 'call_timeout'
+  const emailReason = job.reviewReason === 'email_not_answered' || job.reviewReason === 'email_response_invalid'
 
   const resolve = async (outcome: 'verified' | 'requeue') => {
     setBusy(true); setErr('')
@@ -48,6 +50,7 @@ export function JobDetail({ jobId, onResolved }: { jobId: string; onResolved?: (
           <div className="cell-sub">DOB {fmtDOB(job.patientDob)} · Member ID <span className="num">{job.memberId}</span></div>
           <div className="cell-sub">{job.payerName} · Payer ID {job.stediPayerId}</div>
           {byVoice && <div style={{ marginTop: 6 }}><span className="badge tone-violet"><Icon name="phone" size={12} /> {job.status === 'VERIFIED' || job.status === 'COVERAGE_GAP_FLAGGED' ? 'Verified by AI phone call' : job.status === 'CALL_IN_PROGRESS' ? 'AI phone call in progress' : 'AI phone call attempted'}{job.payerPhone ? ` · ${job.payerPhone}` : ''}</span></div>}
+          {byEmail && <div style={{ marginTop: 6 }}><span className="badge tone-violet"><Icon name="mail" size={12} /> {job.status === 'VERIFIED' || job.status === 'COVERAGE_GAP_FLAGGED' ? 'Verified via emailed form' : job.status === 'EMAIL_PENDING' ? 'Awaiting emailed form response' : 'Emailed form attempted'}{job.payerEmail ? ` · ${job.payerEmail}` : ''}</span></div>}
         </div>
         <StatusBadge status={job.status} job={job} />
       </div>
@@ -63,6 +66,17 @@ export function JobDetail({ jobId, onResolved }: { jobId: string; onResolved?: (
           </div>
         </div>
       )}
+      {job.status === 'EMAIL_PENDING' && (
+        <div className="notice blue">
+          <span>✉</span>
+          <div>
+            <b>Verification form emailed to {job.payerName}{job.payerEmail ? ` (${job.payerEmail})` : ''}.</b>
+            <div style={{ fontSize: 12, marginTop: 4 }}>
+              Sent {fmtTime(job.emailSentAt)}. As soon as their team submits the form, the benefits post here automatically. No response in time lands this in Manual Review — never dropped silently.
+            </div>
+          </div>
+        </div>
+      )}
 
       {job.status === 'NEEDS_MANUAL_REVIEW' && (
         <div className="notice error">
@@ -73,6 +87,8 @@ export function JobDetail({ jobId, onResolved }: { jobId: string; onResolved?: (
             <div style={{ marginTop: 6, fontSize: 12 }}>
               {job.payerPhone
                 ? <>Next step: have the AI agent call {job.payerName} at <b className="num">{job.payerPhone}</b>{voiceReason ? ' again' : ''}, or call yourself with member ID <b className="num">{job.memberId}</b> and DOB <b>{fmtDOB(job.patientDob)}</b> and record the outcome below.</>
+                : job.payerEmail
+                ? <>Next step: send {job.payerName} a new verification email at <b className="num">{job.payerEmail}</b>{emailReason ? ' again' : ''}, or call yourself with member ID <b className="num">{job.memberId}</b> and DOB <b>{fmtDOB(job.patientDob)}</b> and record the outcome below.</>
                 : <>Next step: call the payer with member ID <b className="num">{job.memberId}</b> and DOB <b>{fmtDOB(job.patientDob)}</b>, then record the outcome below.</>}
             </div>
           </div>
@@ -87,7 +103,7 @@ export function JobDetail({ jobId, onResolved }: { jobId: string; onResolved?: (
 
       {b && job.status !== 'MANUAL_RESOLVED' && (
         <div className="card card-pad" style={{ background: 'var(--surface-alt)' }}>
-          <div className="cell-sub" style={{ marginBottom: 6 }}>Coverage brief · {byVoice ? 'from the payer call · ' : ''}{b.source === 'llm' ? `AI-written (${b.model}) — ${b.validation}` : b.source === 'template_fallback' ? `template (model output ${b.validation})` : 'deterministic template'}</div>
+          <div className="cell-sub" style={{ marginBottom: 6 }}>Coverage brief · {byVoice ? 'from the payer call · ' : byEmail ? 'from the emailed form · ' : ''}{b.source === 'llm' ? `AI-written (${b.model}) — ${b.validation}` : b.source === 'template_fallback' ? `template (model output ${b.validation})` : 'deterministic template'}</div>
           <div style={{ fontSize: 15, lineHeight: 1.6 }}>{b.brief}</div>
         </div>
       )}
@@ -115,6 +131,7 @@ export function JobDetail({ jobId, onResolved }: { jobId: string; onResolved?: (
           )}
           {f.limitations.length > 0 && <div className="cell-sub">Limitations: {f.limitations.join(' · ')}</div>}
           {byVoice && f.payerMessages.length > 0 && <div className="cell-sub">From the call: {f.payerMessages.join(' · ')}</div>}
+          {byEmail && f.payerMessages.length > 0 && <div className="cell-sub">From the form: {f.payerMessages.join(' · ')}</div>}
           {f.flags.length > 0 && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{f.flags.map((fl) => <span key={fl} className="badge tone-neutral">{fl}</span>)}</div>}
         </>
       )}
@@ -131,6 +148,8 @@ export function JobDetail({ jobId, onResolved }: { jobId: string; onResolved?: (
             <button className="btn btn-primary" disabled={busy} onClick={() => resolve('verified')}>Mark manually verified</button>
             {job.payerPhone
               ? <button className="btn btn-outline" disabled={busy} onClick={() => resolve('requeue')}><Icon name="phone" size={14} /> {voiceReason ? 'Call payer again with AI agent' : 'Call payer with AI agent'}</button>
+              : job.payerEmail
+              ? <button className="btn btn-outline" disabled={busy} onClick={() => resolve('requeue')}><Icon name="mail" size={14} /> {emailReason ? 'Email payer again' : 'Email payer the form'}</button>
               : <button className="btn btn-ghost" disabled={busy} onClick={() => resolve('requeue')}>Re-run automated check</button>}
           </div>
         </div>

@@ -21,6 +21,7 @@ import (
 	"coveragecheck/internal/db"
 	"coveragecheck/internal/llm"
 	"coveragecheck/internal/normalize"
+	"coveragecheck/internal/notify"
 	"coveragecheck/internal/ratelimit"
 	"coveragecheck/internal/stedi"
 	"coveragecheck/internal/voiceagent"
@@ -35,14 +36,15 @@ type VerifyArgs struct {
 func (VerifyArgs) Kind() string { return "verify_eligibility" }
 
 type Deps struct {
-	Cfg     *config.Config
-	Store   *db.Store
-	Stedi   stedi.Client
-	LLM     *llm.Generator
-	Limiter *ratelimit.PayerLimiter
-	Voice   voiceagent.Client
-	Salvage *voiceagent.TranscriptExtractor // best-effort facts recovery when a call ends without a tool call
-	Log     *slog.Logger
+	Cfg         *config.Config
+	Store       *db.Store
+	Stedi       stedi.Client
+	LLM         *llm.Generator
+	Limiter     *ratelimit.PayerLimiter
+	Voice       voiceagent.Client
+	Salvage     *voiceagent.TranscriptExtractor // best-effort facts recovery when a call ends without a tool call
+	EmailSender notify.Sender                   // sends the verification-form link for payers with no phone line
+	Log         *slog.Logger
 }
 
 type VerifyWorker struct {
@@ -101,7 +103,8 @@ func (w *VerifyWorker) Work(ctx context.Context, rj *river.Job[VerifyArgs]) erro
 	}
 
 	if !payer.SupportsRealtime {
-		if payer.VoiceEnabled() && d.Voice != nil {
+		switch {
+		case payer.VoiceEnabled() && d.Voice != nil:
 			// No EDI path, but we know the payer's phone line: the AI agent makes the call.
 			attempt, err := d.Store.MarkProcessing(ctx, jobID)
 			if err != nil {
@@ -109,10 +112,18 @@ func (w *VerifyWorker) Work(ctx context.Context, rj *river.Job[VerifyArgs]) erro
 			}
 			log.Info("payer has no real-time eligibility -> AI voice call", "to", *payer.ProviderServicesPhone)
 			return w.dispatchVoiceCall(ctx, log, jobID, attempt, payer, patient)
+		case payer.EmailEnabled() && d.EmailSender != nil && d.EmailSender.Configured():
+			// No phone line either, but we have an email: send the hosted verification form.
+			if _, err := d.Store.MarkProcessing(ctx, jobID); err != nil {
+				return err
+			}
+			log.Info("payer has no real-time eligibility or phone line -> emailing verification form", "to", *payer.ProviderServicesEmail)
+			return w.dispatchEmailVerification(ctx, log, jobID, payer, patient)
+		default:
+			log.Info("payer does not support real-time eligibility -> manual review")
+			return d.Store.MarkNeedsReview(ctx, jobID, db.ReasonUnsupportedPayer, nil, "unsupported_payer",
+				fmt.Sprintf("%s does not support electronic (270/271) eligibility checks and has no phone or email on file. Verify by phone or payer portal.", payer.Name))
 		}
-		log.Info("payer does not support real-time eligibility -> manual review")
-		return d.Store.MarkNeedsReview(ctx, jobID, db.ReasonUnsupportedPayer, nil, "unsupported_payer",
-			fmt.Sprintf("%s does not support electronic (270/271) eligibility checks and has no phone line on file. Verify by phone or payer portal.", payer.Name))
 	}
 
 	attempt, err := d.Store.MarkProcessing(ctx, jobID)
@@ -234,6 +245,7 @@ func New(pool *pgxpool.Pool, deps *Deps, nd *NoticeDeps) (*Queue, error) {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &VerifyWorker{d: deps, q: q})
 	river.AddWorker(workers, &VoiceTimeoutWorker{d: deps})
+	river.AddWorker(workers, &EmailTimeoutWorker{d: deps})
 	if nd != nil {
 		river.AddWorker(workers, &NoticeWorker{d: deps, nd: nd})
 	}

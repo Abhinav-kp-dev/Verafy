@@ -95,6 +95,7 @@ export function Dashboard() {
               <div className="queue-row"><span className="ico tone-info">⟳</span>Processing<b>{q.PROCESSING ?? 0}</b></div>
               <div className="queue-row"><span className="ico tone-violet">↻</span>Retrying<b>{q.RETRYING ?? 0}</b></div>
               <div className="queue-row"><span className="ico tone-violet">☎</span>Calling payer<b>{q.CALL_IN_PROGRESS ?? 0}</b></div>
+              <div className="queue-row"><span className="ico tone-violet">✉</span>Awaiting email<b>{q.EMAIL_PENDING ?? 0}</b></div>
               <div className="queue-row"><span className="ico tone-error">!</span>Needs Review<b>{q.NEEDS_MANUAL_REVIEW ?? 0}</b></div>
             </div>
             {throttling.length > 0 && (

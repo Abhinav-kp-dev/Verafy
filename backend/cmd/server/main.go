@@ -72,7 +72,7 @@ func main() {
 
 	salvage := voiceagent.NewTranscriptExtractor(cfg.OpenRouterAPIKey, cfg.LLMModel)
 
-	q, err := queue.New(store.Pool, &queue.Deps{Cfg: cfg, Store: store, Stedi: client, LLM: gen, Limiter: limiter, Voice: voice, Salvage: salvage, Log: log},
+	q, err := queue.New(store.Pool, &queue.Deps{Cfg: cfg, Store: store, Stedi: client, LLM: gen, Limiter: limiter, Voice: voice, Salvage: salvage, EmailSender: sender, Log: log},
 		&queue.NoticeDeps{Sender: sender, PracticePhone: cfg.PracticePhone})
 	if err != nil {
 		log.Error("queue", "err", err)

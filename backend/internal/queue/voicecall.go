@@ -82,35 +82,37 @@ func (q *Queue) CompleteWithFacts(ctx context.Context, callID string, ex voiceag
 	}
 	if verr := voiceagent.Validate(ex); verr != nil {
 		log.Warn("voice facts rejected -> manual review", "reason", verr)
-		return d.Store.MarkVoiceFailed(ctx, job.ID, db.ReasonVoiceCallFailed, "incomplete_facts",
+		return d.Store.MarkChannelFailed(ctx, job.ID, db.StatusCallInProgress, db.ReasonVoiceCallFailed, "incomplete_facts",
 			"The agent reached the payer but the collected data did not pass validation: "+verr.Error(), transcript)
 	}
-	return q.finishWithFacts(ctx, job, callID, ex, transcript, false)
+	return q.finishWithFacts(ctx, job, callID, db.StatusCallInProgress, db.SourceVoiceCall, ex, transcript, false)
 }
 
 // finishWithFacts runs already-validated facts through the same brief pipeline an
-// EDI result gets, and finalizes the job. partial marks a result salvaged from a
-// transcript after an early hangup rather than a clean tool-call submission — it's
-// still real, confirmed data, just tagged so staff know the call didn't finish.
-func (q *Queue) finishWithFacts(ctx context.Context, job *db.Job, callID string, ex voiceagent.Extracted, transcript string, partial bool) error {
+// EDI result gets, and finalizes the job. Shared by every manual-verification channel
+// (voice, email) — from/source say which one this call is completing. partial marks a
+// result salvaged from a transcript after an early hangup rather than a clean
+// submission — it's still real, confirmed data, just tagged so staff know the call
+// didn't finish.
+func (q *Queue) finishWithFacts(ctx context.Context, job *db.Job, refID string, from db.JobStatus, source string, ex voiceagent.Extracted, transcript string, partial bool) error {
 	d := q.deps
-	log := d.Log.With("job", job.ID.String()[:8], "call", callID)
-	facts := voiceagent.ToFacts(ex, job.PayerName)
+	log := d.Log.With("job", job.ID.String()[:8], "ref", refID, "channel", source)
+	facts := voiceagent.ToFacts(ex, job.PayerName, source)
 	if partial {
 		facts.Flags = append(facts.Flags, "call_ended_early_partial_data")
 		facts.Messages = append(facts.Messages, "Call ended before completion; these details were confirmed up to that point.")
 	}
 	brief := d.LLM.Generate(ctx, facts)
 	briefJSON, _ := json.Marshal(brief)
-	raw, _ := json.Marshal(map[string]any{"source": db.SourceVoiceCall, "callId": callID, "submitted": ex, "partial": partial})
+	raw, _ := json.Marshal(map[string]any{"source": source, "refId": refID, "submitted": ex, "partial": partial})
 	status := db.StatusVerified
 	if facts.HasGap {
 		status = db.StatusGapFlagged
 	}
-	if err := d.Store.MarkVoiceResult(ctx, job.ID, status, raw, briefJSON, transcript); err != nil {
+	if err := d.Store.MarkChannelResult(ctx, job.ID, from, status, raw, briefJSON, transcript); err != nil {
 		return err
 	}
-	log.Info("verified by voice call", "status", status, "eligibility", facts.EligibilityStatus, "brief_source", brief.Source, "partial", partial)
+	log.Info("verified", "status", status, "eligibility", facts.EligibilityStatus, "brief_source", brief.Source, "partial", partial)
 	if apptID, _ := d.Store.JobAppointmentID(ctx, job.ID); apptID != nil {
 		if err := q.EnqueueNotice(ctx, job.ID); err != nil {
 			log.Warn("could not enqueue cost notice", "err", err)
@@ -143,7 +145,7 @@ func (q *Queue) CompleteWithFailure(ctx context.Context, callID string, outcome 
 		if salvaged, serr := d.Salvage.Extract(ctx, transcript); serr == nil {
 			if verr := voiceagent.Validate(salvaged); verr == nil {
 				log.Info("call ended early but salvaged usable facts from transcript", "outcome", outcome)
-				return q.finishWithFacts(ctx, job, callID, salvaged, transcript, true)
+				return q.finishWithFacts(ctx, job, callID, db.StatusCallInProgress, db.SourceVoiceCall, salvaged, transcript, true)
 			} else {
 				log.Info("call ended early; transcript salvage had nothing usable", "reason", verr)
 			}
@@ -153,7 +155,7 @@ func (q *Queue) CompleteWithFailure(ctx context.Context, callID string, outcome 
 	}
 
 	log.Warn("voice call failed -> manual review", "outcome", outcome)
-	return d.Store.MarkVoiceFailed(ctx, job.ID, db.ReasonVoiceCallFailed, string(outcome), detail, transcript)
+	return d.Store.MarkChannelFailed(ctx, job.ID, db.StatusCallInProgress, db.ReasonVoiceCallFailed, string(outcome), detail, transcript)
 }
 
 // ---------- watchdog ----------
@@ -188,6 +190,6 @@ func (w *VoiceTimeoutWorker) Work(ctx context.Context, rj *river.Job[VoiceTimeou
 		return nil
 	}
 	w.d.Log.Warn("voice call watchdog fired -> manual review", "job", job.ID.String()[:8], "call", rj.Args.CallID)
-	return w.d.Store.MarkVoiceFailed(ctx, job.ID, db.ReasonCallTimeout, "call_timeout",
+	return w.d.Store.MarkChannelFailed(ctx, job.ID, db.StatusCallInProgress, db.ReasonCallTimeout, "call_timeout",
 		fmt.Sprintf("No result from the payer call after %s. The call may have dropped or is still on hold.", w.d.Cfg.VoiceCallTimeout.Truncate(time.Second)), "")
 }

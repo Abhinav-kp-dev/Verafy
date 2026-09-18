@@ -56,7 +56,10 @@ func Validate(e Extracted) error {
 // ToFacts maps phone-collected data into the same Facts the 271 normalizer produces,
 // so the brief writer, PDF, estimates and dashboard treat both paths identically.
 // Every number is inventoried in Facts.Numbers so the LLM brief validator still applies.
-func ToFacts(e Extracted, payerName string) *normalize.Facts {
+func ToFacts(e Extracted, payerName, sourceTag string) *normalize.Facts {
+	if sourceTag == "" {
+		sourceTag = "manual_channel"
+	}
 	f := &normalize.Facts{
 		EligibilityStatus: strings.ToLower(strings.TrimSpace(e.EligibilityStatus)),
 		PlanName:          strings.TrimSpace(e.PlanName),
@@ -68,7 +71,7 @@ func ToFacts(e Extracted, payerName string) *normalize.Facts {
 		Categories:        []normalize.Category{},
 		NonCovered:        []string{},
 		Limitations:       append([]string{}, e.Limitations...),
-		Flags:             []string{"source_ai_voice_call"},
+		Flags:             []string{"source_" + sourceTag},
 		Messages:          []string{},
 	}
 	if f.EligibilityStatus == "inactive" {

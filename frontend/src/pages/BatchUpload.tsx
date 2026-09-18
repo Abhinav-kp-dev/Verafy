@@ -142,7 +142,7 @@ export function BatchUpload() {
             )}
           </div>
           <div className="tabs" style={{ padding: '0 20px' }}>
-            {[['', 'All'], ['QUEUED', 'Queued'], ['PROCESSING', 'Processing'], ['RETRYING', 'Retrying'], ['CALL_IN_PROGRESS', 'Calling payer'], ['VERIFIED', 'Verified'], ['COVERAGE_GAP_FLAGGED', 'Coverage gap'], ['NEEDS_MANUAL_REVIEW', 'Needs review']].map(([v, l]) => (
+            {[['', 'All'], ['QUEUED', 'Queued'], ['PROCESSING', 'Processing'], ['RETRYING', 'Retrying'], ['CALL_IN_PROGRESS', 'Calling payer'], ['EMAIL_PENDING', 'Awaiting email'], ['VERIFIED', 'Verified'], ['COVERAGE_GAP_FLAGGED', 'Coverage gap'], ['NEEDS_MANUAL_REVIEW', 'Needs review']].map(([v, l]) => (
               <button key={v} className={filter === v ? 'active' : ''} onClick={() => setFilter(v)}>{l}</button>
             ))}
           </div>

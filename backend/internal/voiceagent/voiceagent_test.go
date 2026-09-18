@@ -47,7 +47,7 @@ func TestValidateAcceptsRealisticCalls(t *testing.T) {
 func TestToFactsMirrorsEDIShape(t *testing.T) {
 	ex := Extracted{EligibilityStatus: "active", PlanName: "Delta PPO", DeductibleAnnual: f(50), DeductibleRemaining: f(25), AnnualMaximum: f(1500),
 		PreventivePct: f(100), BasicPct: f(80), MajorPct: f(50), OrthoCovered: b(false), ReferenceNumber: "REF-1", RepName: "Dana"}
-	facts := ToFacts(ex, "Delta Dental")
+	facts := ToFacts(ex, "Delta Dental", "ai_voice_call")
 	if facts.EligibilityStatus != "active" || facts.PayerName != "Delta Dental" || facts.PlanName != "Delta PPO" {
 		t.Fatalf("header fields wrong: %+v", facts)
 	}
@@ -75,7 +75,7 @@ func TestToFactsMirrorsEDIShape(t *testing.T) {
 func TestToFactsInventoriesNumbersFromFreeText(t *testing.T) {
 	ex := Extracted{EligibilityStatus: "active", PreventivePct: f(100), OrthoCovered: b(true), OrthoPct: f(50),
 		Limitations: []string{"Orthodontic lifetime maximum $1,500", "Dependents to age 19"}, WaitingPeriod: "12 months on major"}
-	facts := ToFacts(ex, "P")
+	facts := ToFacts(ex, "P", "ai_voice_call")
 	for _, want := range []float64{1500, 19, 12} {
 		found := false
 		for _, n := range facts.Numbers {
@@ -90,7 +90,7 @@ func TestToFactsInventoriesNumbersFromFreeText(t *testing.T) {
 }
 
 func TestToFactsInactiveIsAGap(t *testing.T) {
-	facts := ToFacts(Extracted{EligibilityStatus: "inactive"}, "X")
+	facts := ToFacts(Extracted{EligibilityStatus: "inactive"}, "X", "ai_voice_call")
 	if !facts.HasGap || !contains(facts.Flags, "coverage_inactive") {
 		t.Errorf("inactive must be a gap: %+v", facts)
 	}

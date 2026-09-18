@@ -11,6 +11,8 @@ export function Settings() {
   const toast = useToast()
   const [editing, setEditing] = useState<Payer | null>(null)
   const [voice, setVoice] = useState({ providerServicesPhone: '', ivrNotes: '' })
+  const [editingEmail, setEditingEmail] = useState<Payer | null>(null)
+  const [email, setEmail] = useState('')
   const [saving, setSaving] = useState(false)
   useEffect(() => { api.config().then(setCfg); api.payers().then(setPayers) }, [])
   const saveVoice = async () => {
@@ -21,6 +23,16 @@ export function Settings() {
       setPayers((list) => list.map((x) => (x.id === p.id ? p : x)))
       toast.show(p.providerServicesPhone ? `${p.name}: the AI agent will now call ${p.providerServicesPhone}` : `${p.name}: voice line removed — back to plain manual review`)
       setEditing(null)
+    } catch (e) { toast.show((e as Error).message, true) } finally { setSaving(false) }
+  }
+  const saveEmail = async () => {
+    if (!editingEmail) return
+    setSaving(true)
+    try {
+      const p = await api.updatePayerEmail(editingEmail.id, email)
+      setPayers((list) => list.map((x) => (x.id === p.id ? p : x)))
+      toast.show(p.providerServicesEmail ? `${p.name}: verification forms will be emailed to ${p.providerServicesEmail}` : `${p.name}: email removed — back to plain manual review`)
+      setEditingEmail(null)
     } catch (e) { toast.show((e as Error).message, true) } finally { setSaving(false) }
   }
   const rl = (id: string): RateLimitState | undefined => rateLimits.find((r) => r.payer === id)
@@ -48,9 +60,9 @@ export function Settings() {
           )}
           {tab === 'payers' && (
             <>
-            <div className="notice blue" style={{ marginBottom: 14 }}><span>☎</span><div>Payers marked <b>No EDI</b> can't be checked electronically. Give one an <b>AI call line</b> and the voice agent will phone it with the same member ID, DOB and NPI a 270 would carry; leave it empty and those checks go straight to Manual Review.</div></div>
+            <div className="notice blue" style={{ marginBottom: 14 }}><span>☎</span><div>Payers marked <b>No EDI</b> can't be checked electronically. Give one an <b>AI call line</b> and the voice agent will phone it, or a <b>verification email</b> to send a hosted form instead (the call takes priority if both are set) — leave both empty and those checks go straight to Manual Review.</div></div>
             <table className="tbl">
-              <thead><tr><th>Payer</th><th>Stedi Payer ID</th><th>Service type</th><th>Real-time 270/271</th><th>AI call line</th><th>Rate limit</th><th>Live state</th></tr></thead>
+              <thead><tr><th>Payer</th><th>Stedi Payer ID</th><th>Service type</th><th>Real-time 270/271</th><th>AI call line</th><th>Verification email</th><th>Rate limit</th><th>Live state</th></tr></thead>
               <tbody>
                 {payers.map((p) => { const s = rl(p.stediPayerId); return (
                   <tr key={p.id}>
@@ -74,6 +86,24 @@ export function Settings() {
                             ? <span className="badge tone-violet"><Icon name="phone" size={12} /> {p.providerServicesPhone}</span>
                             : <span className="cell-sub">none — manual review</span>}
                           <button className="link" onClick={() => { setEditing(p); setVoice({ providerServicesPhone: p.providerServicesPhone ?? '', ivrNotes: p.ivrNotes ?? '' }) }}>{p.providerServicesPhone ? 'Edit' : 'Add line'}</button>
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      {p.supportsRealtime ? <span className="cell-sub">—</span> : editingEmail?.id === p.id ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 240 }}>
+                          <input className="input" type="email" placeholder="providerservices@payer.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button className="btn btn-primary btn-sm" disabled={saving} onClick={saveEmail}>Save</button>
+                            <button className="btn btn-ghost btn-sm" disabled={saving} onClick={() => setEditingEmail(null)}>Cancel</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          {p.providerServicesEmail
+                            ? <span className="badge tone-violet"><Icon name="mail" size={12} /> {p.providerServicesEmail}</span>
+                            : <span className="cell-sub">none — manual review</span>}
+                          <button className="link" onClick={() => { setEditingEmail(p); setEmail(p.providerServicesEmail ?? '') }}>{p.providerServicesEmail ? 'Edit' : 'Add email'}</button>
                         </div>
                       )}
                     </td>
@@ -102,6 +132,13 @@ export function Settings() {
                   ? <span className="badge tone-success"><span className="dot" />live · {cfg.voiceProvider ?? 'bolna'}</span>
                   : <span className="badge tone-info"><span className="dot" />simulated — no calls placed</span>}
                 {cfg.voiceMode !== 'live' && <div className="help" style={{ marginTop: 6 }}>To place real calls (India-ready via Bolna): <code>VOICE_MODE=live VOICE_PROVIDER=bolna BOLNA_API_KEY=… BOLNA_AGENT_ID=… VOICE_WEBHOOK_SECRET=…</code>, build the agent from <code>GET /api/voice/agent-spec?baseUrl=&lt;public URL&gt;</code>, and add each payer's line under Payer Settings.</div>}
+              </dd>
+              <dt>Payers with no phone line</dt><dd>
+                A short hosted form is emailed to the payer's provider services team with the patient's details; their submission runs through the exact same facts pipeline as a phone call, tagged <code>email_form</code>. Response window: <b className="num">{cfg.emailResponseTimeout ?? '72h'}</b>, then Manual Review.
+                {' '}{cfg.emailFormEnabled
+                  ? <span className="badge tone-success"><span className="dot" />email delivery on</span>
+                  : <span className="badge tone-neutral"><span className="dot" />off — configure SMTP or Resend to send</span>}
+                <div className="help" style={{ marginTop: 6 }}>Forms are hosted at <code>{cfg.emailFormBaseURL}/verify-form/…</code> — set <code>EMAIL_FORM_BASE_URL</code> to your public origin before going live so the emailed link is reachable.</div>
               </dd>
             </dl>
           )}

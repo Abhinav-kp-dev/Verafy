@@ -17,20 +17,22 @@ type payer struct {
 	name, stediID, stc, planType string
 	realtime                     bool
 	phone, ivr                   string // voice path for payers without real-time EDI
+	email                        string // email-form path for payers without a phone line
 }
 
 var payers = []payer{
-	{"Ameritas", "AMTAS00425", "35", "PPO", true, "", ""},
-	{"Anthem BCBS California", "84103", "35", "PPO", true, "", ""},
-	{"Cigna Dental", "62308", "35", "DHMO", true, "", ""},
-	{"MetLife Dental", "10134", "35", "PPO", true, "", ""},
-	{"UnitedHealthcare Dental", "52133", "35", "PPO", true, "", ""},
-	{"UnitedHealthcare", "87726", "30", "PPO", true, "", ""}, // Stedi AAA error mocks live under this payer
+	{"Ameritas", "AMTAS00425", "35", "PPO", true, "", "", ""},
+	{"Anthem BCBS California", "84103", "35", "PPO", true, "", "", ""},
+	{"Cigna Dental", "62308", "35", "DHMO", true, "", "", ""},
+	{"MetLife Dental", "10134", "35", "PPO", true, "", "", ""},
+	{"UnitedHealthcare Dental", "52133", "35", "PPO", true, "", "", ""},
+	{"UnitedHealthcare", "87726", "30", "PPO", true, "", "", ""}, // Stedi AAA error mocks live under this payer
 	// No real-time 270/271 in test mode. With a provider-services line on file the AI voice
 	// agent calls instead of routing straight to manual review.
-	{"Delta Dental", "DDPA", "35", "PPO", false, "+18005240149", "Press 2 for dental providers, then 1 for eligibility and benefits; say 'representative' to skip the automated benefits read-back."},
-	{"Guardian Dental", "GRDN", "35", "PPO", false, "+18005414254", "Provider services menu: option 3 for eligibility. Have the NPI ready."},
-	{"Principal Dental", "PRNC", "35", "PPO", false, "", ""}, // deliberately no phone: stays on the plain manual-review path
+	{"Delta Dental", "DDPA", "35", "PPO", false, "+18005240149", "Press 2 for dental providers, then 1 for eligibility and benefits; say 'representative' to skip the automated benefits read-back.", ""},
+	{"Guardian Dental", "GRDN", "35", "PPO", false, "+18005414254", "Provider services menu: option 3 for eligibility. Have the NPI ready.", ""},
+	// No phone line on file, but a provider-services email: gets the hosted-form path instead of a call.
+	{"Principal Dental", "PRNC", "35", "PPO", false, "", "", "providerservices@principal-dental-demo.example"},
 }
 
 func main() {
@@ -56,14 +58,20 @@ func main() {
 		var id uuid.UUID
 		err := pool.QueryRow(ctx, `SELECT id FROM payers WHERE stedi_payer_id=$1`, p.stediID).Scan(&id)
 		if err != nil {
-			must(pool.QueryRow(ctx, `INSERT INTO payers (name, stedi_payer_id, supports_realtime, service_type_code, plan_type, provider_services_phone, ivr_notes) VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),NULLIF($7,'')) RETURNING id`,
-				p.name, p.stediID, p.realtime, p.stc, p.planType, p.phone, p.ivr).Scan(&id))
+			must(pool.QueryRow(ctx, `INSERT INTO payers (name, stedi_payer_id, supports_realtime, service_type_code, plan_type, provider_services_phone, ivr_notes, provider_services_email) VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),NULLIF($7,''),NULLIF($8,'')) RETURNING id`,
+				p.name, p.stediID, p.realtime, p.stc, p.planType, p.phone, p.ivr, p.email).Scan(&id))
 			fmt.Printf("created payer %-28s %s\n", p.name, p.stediID)
 			created++
-		} else if p.phone != "" {
-			// idempotent: keep the voice directory current for payers that already exist
-			_, err := pool.Exec(ctx, `UPDATE payers SET provider_services_phone=$2, ivr_notes=NULLIF($3,'') WHERE id=$1 AND provider_services_phone IS DISTINCT FROM $2`, id, p.phone, p.ivr)
-			must(err)
+		} else {
+			// idempotent: keep the manual-verification directory current for payers that already exist
+			if p.phone != "" {
+				_, err := pool.Exec(ctx, `UPDATE payers SET provider_services_phone=$2, ivr_notes=NULLIF($3,'') WHERE id=$1 AND provider_services_phone IS DISTINCT FROM $2`, id, p.phone, p.ivr)
+				must(err)
+			}
+			if p.email != "" {
+				_, err := pool.Exec(ctx, `UPDATE payers SET provider_services_email=$2 WHERE id=$1 AND provider_services_email IS DISTINCT FROM $2`, id, p.email)
+				must(err)
+			}
 		}
 	}
 	fmt.Printf("seed complete: %d payers (%d new). Upload patients via CSV in Batch Upload — see seed-data/patients.csv\n", len(payers), created)

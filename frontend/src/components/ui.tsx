@@ -17,7 +17,7 @@ export function StatusBadge({ status, job }: { status: JobStatus; job?: Job }) {
     const secs = job.nextAttemptAt ? Math.max(0, Math.round((new Date(job.nextAttemptAt).getTime() - Date.now()) / 1000)) : 0
     label = `Retry ${job.attemptCount}/${maxAttempts} · ${secs > 0 ? `next in ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : 'retrying…'}`
   }
-  const live = status === 'PROCESSING' || status === 'RETRYING' || status === 'CALL_IN_PROGRESS'
+  const live = status === 'PROCESSING' || status === 'RETRYING' || status === 'CALL_IN_PROGRESS' || status === 'EMAIL_PENDING'
   return <span className={`badge tone-${m.tone} ${live ? 'pulse' : ''}`}><span className="dot" />{label}</span>
 }
 

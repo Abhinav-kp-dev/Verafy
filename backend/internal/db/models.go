@@ -10,19 +10,21 @@ import (
 type JobStatus string
 
 const (
-	StatusQueued        JobStatus = "QUEUED"
-	StatusProcessing    JobStatus = "PROCESSING"
-	StatusVerified      JobStatus = "VERIFIED"
-	StatusGapFlagged    JobStatus = "COVERAGE_GAP_FLAGGED"
-	StatusRetrying      JobStatus = "RETRYING"
-	StatusNeedsReview   JobStatus = "NEEDS_MANUAL_REVIEW"
-	StatusManualResolve JobStatus = "MANUAL_RESOLVED"
+	StatusQueued         JobStatus = "QUEUED"
+	StatusProcessing     JobStatus = "PROCESSING"
+	StatusVerified       JobStatus = "VERIFIED"
+	StatusGapFlagged     JobStatus = "COVERAGE_GAP_FLAGGED"
+	StatusRetrying       JobStatus = "RETRYING"
+	StatusNeedsReview    JobStatus = "NEEDS_MANUAL_REVIEW"
+	StatusManualResolve  JobStatus = "MANUAL_RESOLVED"
 	StatusCallInProgress JobStatus = "CALL_IN_PROGRESS" // AI voice agent is on the phone with the payer
+	StatusEmailPending   JobStatus = "EMAIL_PENDING"    // verification form emailed to the payer, awaiting their response
 )
 
 const (
 	SourceStedi     = "stedi_270_271"
 	SourceVoiceCall = "ai_voice_call"
+	SourceEmailForm = "email_form"
 )
 
 // batchColumn maps a status to its denormalized counter column on batches.
@@ -35,9 +37,10 @@ var batchColumn = map[JobStatus]string{
 	StatusRetrying:      "retrying",
 	StatusNeedsReview:   "needs_review",
 	StatusManualResolve: "manual_resolved",
-	// A call in flight is still "processing" from the batch's point of view; sharing the
-	// column keeps counters exact without a schema change (PROCESSING -> CALL_IN_PROGRESS is a no-op).
+	// A call or an outstanding email are both still "processing" from the batch's point of
+	// view; sharing the column keeps counters exact without a schema change.
 	StatusCallInProgress: "processing",
+	StatusEmailPending:   "processing",
 }
 
 type ReviewReason string
@@ -50,6 +53,8 @@ const (
 	ReasonPayerRejected     ReviewReason = "payer_rejected"
 	ReasonVoiceCallFailed   ReviewReason = "voice_call_failed"
 	ReasonCallTimeout       ReviewReason = "call_timeout"
+	ReasonEmailNotAnswered  ReviewReason = "email_not_answered"
+	ReasonEmailInvalid      ReviewReason = "email_response_invalid"
 )
 
 type Practice struct {
@@ -64,14 +69,21 @@ type Payer struct {
 	SupportsRealtime bool      `db:"supports_realtime" json:"supportsRealtime"`
 	ServiceTypeCode  string    `db:"service_type_code" json:"serviceTypeCode"`
 	PlanType         string    `db:"plan_type" json:"planType"`
-	// Voice path for payers without real-time EDI. NULL phone = plain manual review.
+	// Manual-verification channels for payers without real-time EDI. Both are optional
+	// and independent; a payer may have a phone, an email, both, or neither (plain manual review).
 	ProviderServicesPhone *string `db:"provider_services_phone" json:"providerServicesPhone,omitempty"`
 	IVRNotes              *string `db:"ivr_notes" json:"ivrNotes,omitempty"`
+	ProviderServicesEmail *string `db:"provider_services_email" json:"providerServicesEmail,omitempty"`
 }
 
 // VoiceEnabled reports whether this payer can be verified by an AI phone call.
 func (p *Payer) VoiceEnabled() bool {
 	return p.ProviderServicesPhone != nil && *p.ProviderServicesPhone != ""
+}
+
+// EmailEnabled reports whether this payer can be verified via the emailed form.
+func (p *Payer) EmailEnabled() bool {
+	return p.ProviderServicesEmail != nil && *p.ProviderServicesEmail != ""
 }
 
 type Patient struct {
@@ -134,6 +146,9 @@ type Job struct {
 	CallTranscript     *string    `db:"call_transcript" json:"callTranscript,omitempty"`
 	CallStartedAt      *time.Time `db:"call_started_at" json:"callStartedAt,omitempty"`
 	CallCompletedAt    *time.Time `db:"call_completed_at" json:"callCompletedAt,omitempty"`
+	// email-form verification
+	EmailToken  *string    `db:"email_token" json:"emailToken,omitempty"`
+	EmailSentAt *time.Time `db:"email_sent_at" json:"emailSentAt,omitempty"`
 	// joined
 	PatientName  string    `db:"patient_name" json:"patientName"`
 	PatientDOB   time.Time `db:"patient_dob" json:"patientDob"`
@@ -141,6 +156,7 @@ type Job struct {
 	PayerName    string    `db:"payer_name" json:"payerName"`
 	StediPayerID string    `db:"stedi_payer_id" json:"stediPayerId"`
 	PayerPhone   *string   `db:"payer_phone" json:"payerPhone,omitempty"`
+	PayerEmail   *string   `db:"payer_email" json:"payerEmail,omitempty"`
 }
 
 type JobAttempt struct {

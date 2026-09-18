@@ -100,6 +100,10 @@ func reasonText(r *db.ReviewReason) string {
 		return "AI phone call could not complete verification"
 	case db.ReasonCallTimeout:
 		return "AI phone call timed out"
+	case db.ReasonEmailNotAnswered:
+		return "Verification email was not answered"
+	case db.ReasonEmailInvalid:
+		return "Emailed verification form had invalid data"
 	default:
 		return string(*r)
 	}

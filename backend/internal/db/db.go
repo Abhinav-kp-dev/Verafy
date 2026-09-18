@@ -44,17 +44,17 @@ func (s *Store) DefaultPractice(ctx context.Context) (*Practice, error) {
 }
 
 func (s *Store) ListPayers(ctx context.Context) ([]Payer, error) {
-	rows, _ := s.Pool.Query(ctx, `SELECT id, name, stedi_payer_id, supports_realtime, service_type_code, plan_type, provider_services_phone, ivr_notes FROM payers ORDER BY name`)
+	rows, _ := s.Pool.Query(ctx, `SELECT id, name, stedi_payer_id, supports_realtime, service_type_code, plan_type, provider_services_phone, ivr_notes, provider_services_email FROM payers ORDER BY name`)
 	return pgx.CollectRows(rows, pgx.RowToStructByName[Payer])
 }
 
 func (s *Store) GetPayer(ctx context.Context, id uuid.UUID) (*Payer, error) {
-	rows, _ := s.Pool.Query(ctx, `SELECT id, name, stedi_payer_id, supports_realtime, service_type_code, plan_type, provider_services_phone, ivr_notes FROM payers WHERE id=$1`, id)
+	rows, _ := s.Pool.Query(ctx, `SELECT id, name, stedi_payer_id, supports_realtime, service_type_code, plan_type, provider_services_phone, ivr_notes, provider_services_email FROM payers WHERE id=$1`, id)
 	return pgx.CollectExactlyOneRow(rows, pgx.RowToAddrOfStructByName[Payer])
 }
 
 func (s *Store) FindPayerByStediID(ctx context.Context, stediID string) (*Payer, error) {
-	rows, _ := s.Pool.Query(ctx, `SELECT id, name, stedi_payer_id, supports_realtime, service_type_code, plan_type, provider_services_phone, ivr_notes FROM payers WHERE stedi_payer_id=$1 LIMIT 1`, stediID)
+	rows, _ := s.Pool.Query(ctx, `SELECT id, name, stedi_payer_id, supports_realtime, service_type_code, plan_type, provider_services_phone, ivr_notes, provider_services_email FROM payers WHERE stedi_payer_id=$1 LIMIT 1`, stediID)
 	return pgx.CollectExactlyOneRow(rows, pgx.RowToAddrOfStructByName[Payer])
 }
 
@@ -170,8 +170,9 @@ SELECT j.id, j.batch_id, j.patient_id, j.payer_id, j.status, j.attempt_count, j.
        j.raw_response, j.normalized_brief, j.review_reason, j.error_code, j.error_message,
        j.resolved_by, j.resolution_note, j.started_at, j.completed_at, j.resolved_at, j.created_at, j.updated_at,
        j.verification_source, j.call_id, j.call_transcript, j.call_started_at, j.call_completed_at,
+       j.email_token, j.email_sent_at,
        p.name AS patient_name, p.dob AS patient_dob, p.member_id, py.name AS payer_name, py.stedi_payer_id,
-       py.provider_services_phone AS payer_phone
+       py.provider_services_phone AS payer_phone, py.provider_services_email AS payer_email
 FROM jobs j
 JOIN patients p ON p.id = j.patient_id
 JOIN payers py ON py.id = j.payer_id`
@@ -481,7 +482,7 @@ func (s *Store) RequeueFromReview(ctx context.Context, jobID uuid.UUID) error {
 	return tx.Commit(ctx)
 }
 
-// ---------- AI voice verification ----------
+// ---------- manual-verification channels (AI voice calls, emailed forms) ----------
 
 // UpdatePayerVoice sets (or clears, with empty strings) the phone line the AI agent
 // dials for a payer that has no real-time EDI, plus free-text IVR hints.
@@ -496,9 +497,28 @@ func (s *Store) UpdatePayerVoice(ctx context.Context, payerID uuid.UUID, phone, 
 	return nil
 }
 
+// UpdatePayerEmail sets (or clears, with an empty string) the address the verification
+// form is emailed to for a payer that has no real-time EDI.
+func (s *Store) UpdatePayerEmail(ctx context.Context, payerID uuid.UUID, email string) error {
+	tag, err := s.Pool.Exec(ctx, `UPDATE payers SET provider_services_email=NULLIF($2,'') WHERE id=$1`, payerID, email)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
 // GetJobByCallID resolves a voice-platform call back to our job.
 func (s *Store) GetJobByCallID(ctx context.Context, callID string) (*Job, error) {
 	rows, _ := s.Pool.Query(ctx, jobSelect+` WHERE j.call_id=$1`, callID)
+	return pgx.CollectExactlyOneRow(rows, pgx.RowToAddrOfStructByName[Job])
+}
+
+// GetJobByEmailToken resolves a submitted verification form back to our job.
+func (s *Store) GetJobByEmailToken(ctx context.Context, token string) (*Job, error) {
+	rows, _ := s.Pool.Query(ctx, jobSelect+` WHERE j.email_token=$1`, token)
 	return pgx.CollectExactlyOneRow(rows, pgx.RowToAddrOfStructByName[Job])
 }
 
@@ -522,9 +542,30 @@ func (s *Store) MarkCallInProgress(ctx context.Context, jobID uuid.UUID, callID 
 	return tx.Commit(ctx)
 }
 
-// MarkVoiceResult: CALL_IN_PROGRESS -> VERIFIED | COVERAGE_GAP_FLAGGED with the facts the
-// agent collected. Guarded: a late or duplicate webhook cannot overwrite a finished job.
-func (s *Store) MarkVoiceResult(ctx context.Context, jobID uuid.UUID, status JobStatus, raw, brief json.RawMessage, transcript string) error {
+// MarkEmailPending: PROCESSING -> EMAIL_PENDING once the verification-request email is sent.
+func (s *Store) MarkEmailPending(ctx context.Context, jobID uuid.UUID, token string) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := transition(ctx, tx, jobID, StatusEmailPending); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE jobs SET verification_source=$2, email_token=$3, email_sent_at=now(), error_code=NULL, error_message=NULL WHERE id=$1`,
+		jobID, SourceEmailForm, token); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE job_attempts SET status='EMAIL_PENDING' WHERE job_id=$1 AND attempt_number=(SELECT attempt_count FROM jobs WHERE id=$1)`, jobID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// MarkChannelResult: from (CALL_IN_PROGRESS | EMAIL_PENDING) -> VERIFIED | COVERAGE_GAP_FLAGGED
+// with the facts collected. Guarded: a late or duplicate submission cannot overwrite a
+// finished job. transcript is voice-only; pass "" for the email channel.
+func (s *Store) MarkChannelResult(ctx context.Context, jobID uuid.UUID, from, status JobStatus, raw, brief json.RawMessage, transcript string) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -534,10 +575,10 @@ func (s *Store) MarkVoiceResult(ctx context.Context, jobID uuid.UUID, status Job
 	if err != nil {
 		return err
 	}
-	if old != StatusCallInProgress {
-		return fmt.Errorf("job is %s, not CALL_IN_PROGRESS", old)
+	if old != from {
+		return fmt.Errorf("job is %s, not %s", old, from)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE jobs SET raw_response=$2, normalized_brief=$3, call_transcript=NULLIF($4,''), call_completed_at=now(), completed_at=now(), error_code=NULL, error_message=NULL WHERE id=$1`,
+	if _, err := tx.Exec(ctx, `UPDATE jobs SET raw_response=$2, normalized_brief=$3, call_transcript=COALESCE(NULLIF($4,''), call_transcript), call_completed_at=CASE WHEN $4 <> '' THEN now() ELSE call_completed_at END, completed_at=now(), error_code=NULL, error_message=NULL WHERE id=$1`,
 		jobID, raw, brief, transcript); err != nil {
 		return err
 	}
@@ -547,9 +588,10 @@ func (s *Store) MarkVoiceResult(ctx context.Context, jobID uuid.UUID, status Job
 	return tx.Commit(ctx)
 }
 
-// MarkVoiceFailed: CALL_IN_PROGRESS -> NEEDS_MANUAL_REVIEW, keeping whatever transcript
-// exists so staff do not start from zero. Guarded like MarkVoiceResult.
-func (s *Store) MarkVoiceFailed(ctx context.Context, jobID uuid.UUID, reason ReviewReason, code, msg, transcript string) error {
+// MarkChannelFailed: from (CALL_IN_PROGRESS | EMAIL_PENDING) -> NEEDS_MANUAL_REVIEW,
+// keeping whatever transcript exists (voice only) so staff do not start from zero.
+// Guarded like MarkChannelResult.
+func (s *Store) MarkChannelFailed(ctx context.Context, jobID uuid.UUID, from JobStatus, reason ReviewReason, code, msg, transcript string) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -559,10 +601,10 @@ func (s *Store) MarkVoiceFailed(ctx context.Context, jobID uuid.UUID, reason Rev
 	if err != nil {
 		return err
 	}
-	if old != StatusCallInProgress {
-		return fmt.Errorf("job is %s, not CALL_IN_PROGRESS", old)
+	if old != from {
+		return fmt.Errorf("job is %s, not %s", old, from)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE jobs SET review_reason=$2, error_code=$3, error_message=$4, call_transcript=COALESCE(NULLIF($5,''), call_transcript), call_completed_at=now(), completed_at=now(), next_attempt_at=NULL WHERE id=$1`,
+	if _, err := tx.Exec(ctx, `UPDATE jobs SET review_reason=$2, error_code=$3, error_message=$4, call_transcript=COALESCE(NULLIF($5,''), call_transcript), call_completed_at=CASE WHEN $5 <> '' THEN now() ELSE call_completed_at END, completed_at=now(), next_attempt_at=NULL WHERE id=$1`,
 		jobID, reason, nullIfEmpty(code), nullIfEmpty(msg), transcript); err != nil {
 		return err
 	}
@@ -636,7 +678,7 @@ func (s *Store) Stats(ctx context.Context) (*Stats, error) {
 	st.GapFlagged = st.ByStatus["COVERAGE_GAP_FLAGGED"]
 	st.NeedsReview = st.ByStatus["NEEDS_MANUAL_REVIEW"]
 	st.ManualResolved = st.ByStatus["MANUAL_RESOLVED"]
-	st.InProgress = st.ByStatus["QUEUED"] + st.ByStatus["PROCESSING"] + st.ByStatus["RETRYING"] + st.ByStatus["CALL_IN_PROGRESS"]
+	st.InProgress = st.ByStatus["QUEUED"] + st.ByStatus["PROCESSING"] + st.ByStatus["RETRYING"] + st.ByStatus["CALL_IN_PROGRESS"] + st.ByStatus["EMAIL_PENDING"]
 	done := st.Verified + st.GapFlagged + st.NeedsReview + st.ManualResolved
 	if done > 0 {
 		st.SuccessRate = float64(st.Verified+st.GapFlagged+st.ManualResolved) / float64(done) * 100

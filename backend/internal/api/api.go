@@ -30,14 +30,14 @@ import (
 )
 
 type Server struct {
-	cfg     *config.Config
-	store   *db.Store
-	queue   *queue.Queue
-	hub     *events.Hub
-	limiter *ratelimit.PayerLimiter
-	llm     *llm.Generator
-	sender  notify.Sender
-	log     *slog.Logger
+	cfg       *config.Config
+	store     *db.Store
+	queue     *queue.Queue
+	hub       *events.Hub
+	limiter   *ratelimit.PayerLimiter
+	llm       *llm.Generator
+	sender    notify.Sender
+	log       *slog.Logger
 	stediMode string
 
 	practice  *db.Practice
@@ -87,6 +87,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerPDFRoutes(mux)
 	s.registerNotificationRoutes(mux)
 	s.registerVoiceRoutes(mux)
+	s.registerEmailFormRoutes(mux)
 	return s.cors(s.inboundLimit(mux))
 }
 
@@ -176,27 +177,30 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) configInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
-		"practice":     s.practice,
-		"stediMode":    s.stediMode,
-		"stediBaseURL": s.cfg.StediBaseURL,
-		"providerNPI":  s.cfg.ProviderNPI,
-		"providerName": s.cfg.ProviderName,
-		"llmEnabled":   s.llm.Enabled(),
-		"llmModel":     s.cfg.LLMModel,
-		"maxWorkers":   s.cfg.MaxWorkers,
-		"maxAttempts":  s.cfg.MaxAttempts,
-		"retryBase":    s.cfg.RetryBase.String(),
-		"payerRPS":     s.cfg.PayerRPS,
-		"payerBurst":   s.cfg.PayerBurst,
-		"chatEnabled":   s.assistant != nil && s.assistant.Configured(),
-		"emailDelivery": s.sender != nil && s.sender.Configured(),
-		"emailProvider": s.emailProvider(),
-		"nightlyHour":   s.cfg.NightlyHour,
-		"timezone":      s.cfg.Timezone,
-		"practicePhone": s.cfg.PracticePhone,
-		"voiceMode":     s.cfg.VoiceMode,
-		"voiceProvider": s.cfg.VoiceProvider,
-		"voiceCallTimeout": s.cfg.VoiceCallTimeout.String(),
+		"practice":             s.practice,
+		"stediMode":            s.stediMode,
+		"stediBaseURL":         s.cfg.StediBaseURL,
+		"providerNPI":          s.cfg.ProviderNPI,
+		"providerName":         s.cfg.ProviderName,
+		"llmEnabled":           s.llm.Enabled(),
+		"llmModel":             s.cfg.LLMModel,
+		"maxWorkers":           s.cfg.MaxWorkers,
+		"maxAttempts":          s.cfg.MaxAttempts,
+		"retryBase":            s.cfg.RetryBase.String(),
+		"payerRPS":             s.cfg.PayerRPS,
+		"payerBurst":           s.cfg.PayerBurst,
+		"chatEnabled":          s.assistant != nil && s.assistant.Configured(),
+		"emailDelivery":        s.sender != nil && s.sender.Configured(),
+		"emailProvider":        s.emailProvider(),
+		"nightlyHour":          s.cfg.NightlyHour,
+		"timezone":             s.cfg.Timezone,
+		"practicePhone":        s.cfg.PracticePhone,
+		"voiceMode":            s.cfg.VoiceMode,
+		"voiceProvider":        s.cfg.VoiceProvider,
+		"emailFormEnabled":     s.sender != nil && s.sender.Configured(),
+		"emailFormBaseURL":     s.cfg.EmailFormBaseURL,
+		"emailResponseTimeout": s.cfg.EmailResponseTimeout.String(),
+		"voiceCallTimeout":     s.cfg.VoiceCallTimeout.String(),
 	})
 }
 

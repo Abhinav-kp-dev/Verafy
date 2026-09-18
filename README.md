@@ -19,6 +19,7 @@ Verafy is a full-stack insurance eligibility verification platform built for den
 - 📬 **Pre-visit cost notices** — estimates patient out-of-pocket share (deductible → coinsurance → annual max) and emails it before the appointment
 - ☎️ **AI voice verification for payers with no EDI** — when a payer can't be checked electronically, a voice agent phones its provider-services line with the same member ID/DOB/NPI a 270 would carry, asks a fixed question script, records the answers through a structured tool call, and the result rejoins the normal pipeline tagged `ai_voice_call` (India-ready via Bolna; Retell supported)
 - 🩹 **Graceful early-hangup recovery** — if the call ends before the agent formally submits its findings, an LLM salvage pass reads the transcript and recovers whatever was actually confirmed up to that point, so a cut-short call still surfaces real (flagged, partial) data instead of an empty Manual Review case
+- ✉️ **Email-form verification** — a third channel alongside EDI and voice: a payer with no phone line but an email gets sent a link to a short hosted form (no login) asking the same benefit questions; their submission runs through the identical facts pipeline and shows up tagged `email_form`
 - 🔔 **Live notification center** — derived entirely from real state (new manual-review cases, failed email deliveries, a paused queue) — never a fabricated event
 - ⏯️ **Queue control** — pause/resume the verification queue and purge everything still waiting, from one toggle in the topbar
 - 📄 **PDF export** — download a single patient's record or the full practice report as a print-ready PDF, generated server-side
@@ -57,7 +58,11 @@ QUEUED ──► PROCESSING ──► VERIFIED                         (terminal
                       ├──► CALL_IN_PROGRESS                (no EDI, payer has a phone line — AI agent dials)
                       │        ├► VERIFIED | COVERAGE_GAP_FLAGGED   (facts submitted mid-call, validated)
                       │        └► NEEDS_MANUAL_REVIEW              (voice_call_failed | call_timeout, transcript kept)
-                      └──► NEEDS_MANUAL_REVIEW             (rejected / unsupported payer, no phone line)
+                      ├──► EMAIL_PENDING                   (no EDI, no phone — payer has an email — form is sent)
+                      │        ├► VERIFIED | COVERAGE_GAP_FLAGGED   (valid form submitted)
+                      │        ├► EMAIL_PENDING                    (invalid submission — stays open, same link resubmittable)
+                      │        └► NEEDS_MANUAL_REVIEW              (email_not_answered — response window elapsed)
+                      └──► NEEDS_MANUAL_REVIEW             (rejected / unsupported payer, no phone or email)
 NEEDS_MANUAL_REVIEW ──► MANUAL_RESOLVED                    (staff action, audited)
 NEEDS_MANUAL_REVIEW ──► QUEUED                             ("Call payer with AI agent" / re-run)
 ```
@@ -74,6 +79,7 @@ backend/
   internal/api      HTTP handlers, CORS, inbound rate limit, notifications, PDF + voice webhooks
   internal/queue    River worker (state machine) + retry logic + voice dispatch/completion/watchdog
   internal/voiceagent  Bolna + Retell clients, mock stand-in, facts validation, agent spec
+                       (Extracted/Validate/ToFacts are shared by the email-form channel too)
   internal/stedi    X12 270/271 live client + mock simulator
   internal/normalize  271 → typed Facts field mapper (no AI)
   internal/llm      Gemini brief writer + numeric validation + template fallback
@@ -170,6 +176,22 @@ Some payers (e.g. Delta Dental in test mode) have no 270/271 path. Instead of pa
 
 ---
 
+## Email-Form Verification (payers with no phone line)
+
+The third channel: a payer with no real-time EDI and no phone line, but a provider-services email, gets sent a link to a short hosted form instead.
+
+1. The worker sees `supports_realtime = false`, no `provider_services_phone`, and a `provider_services_email` on the payer.
+2. It generates a one-time token, emails a link (`{EMAIL_FORM_BASE_URL}/verify-form/{token}`) via whatever `notify.Sender` is configured (SMTP or Resend — the same one pre-visit notices use), and parks the job in `EMAIL_PENDING`.
+3. The form itself is a single self-contained page (`GET /verify-form/{token}`, no login) asking the exact same questions the voice agent asks — active/inactive, deductible, annual max, coinsurance, orthodontics, waiting periods, rep name + reference number.
+4. On submit, the form POSTs JSON to `/api/webhooks/email/facts/{token}`, which validates it through the same `voiceagent.Validate`/`ToFacts` gate a phone call's tool-call goes through, runs the normal brief pipeline, and finalizes to `VERIFIED`/`COVERAGE_GAP_FLAGGED` tagged `verification_source = email_form`.
+5. An invalid submission (e.g. "remaining" exceeding the total, a percentage out of range) is **not** a dead end — unlike a one-shot phone call, a form can just be corrected. Basic consistency checks run client-side first with an inline, scrollable error message; anything that still fails server-side validation returns a clear reason and leaves the job in `EMAIL_PENDING` so the same link can be resubmitted. Only a genuinely unanswered request — no valid submission within `EMAIL_RESPONSE_TIMEOUT` (default 72h, watched by a River-scheduled job) — escalates to `NEEDS_MANUAL_REVIEW` (`email_not_answered`). A submission to an already-*completed* link is rejected, not silently ignored.
+
+**Priority when a payer has both a phone and an email on file:** the AI voice call wins — email is the fallback for payers you haven't (or can't) set up a phone line for.
+
+**Going live:** set `EMAIL_FORM_BASE_URL` to your public origin (e.g. behind the same ngrok tunnel used for voice, or your real domain in production) so the emailed link is reachable, and configure SMTP or Resend delivery (see "Enabling Email" below) — no separate signup needed, it reuses the existing email delivery integration. Add a payer's address under **Settings → Payer Settings → Add email**.
+
+---
+
 ## Environment Variables
 
 ### Backend (`backend/.env`)
@@ -206,6 +228,8 @@ Some payers (e.g. Delta Dental in test mode) have no 270/271 path. Instead of pa
 | `BOLNA_FROM_NUMBER` | — | optional | Connected Exotel/Plivo number for a +91 caller ID |
 | `VOICE_WEBHOOK_SECRET` | — | if live+bolna | Shared secret for Bolna's (unsigned) callbacks |
 | `RETELL_API_KEY` / `RETELL_AGENT_ID` / `RETELL_FROM_NUMBER` | — | if live+retell | Retell credentials (webhooks are HMAC-signed with the key) |
+| `EMAIL_FORM_BASE_URL` | `http://localhost:8080` | for real links | Public origin the emailed verification-form link points to |
+| `EMAIL_RESPONSE_TIMEOUT` | `72h` | | Watchdog before an unanswered email goes to Manual Review |
 
 ### Frontend (`frontend/.env`)
 
@@ -239,7 +263,7 @@ Some payers (e.g. Delta Dental in test mode) have no 270/271 path. Instead of pa
 | Jane Doe | UnitedHealthcare | `UHCAAA75` | 🚨 NEEDS_MANUAL_REVIEW (subscriber not found) |
 | Olivia Bennett | Delta Dental | `E788123456` | ☎️ CALL_IN_PROGRESS → VERIFIED via AI voice call (mock: active) |
 | any patient | Delta / Guardian | ends in `0` / `9` / `5` | ☎️ mock: no answer / IVR dead end → Manual Review · inactive → COVERAGE_GAP_FLAGGED |
-| any patient | Principal Dental | any | 🚨 NEEDS_MANUAL_REVIEW (no EDI and no phone line on file) |
+| any patient | Principal Dental | any | ✉️ EMAIL_PENDING → submit the form at `/verify-form/{token}` → VERIFIED |
 | any voice call | Delta / Guardian | ended before facts submitted | 🩹 transcript salvage → VERIFIED/COVERAGE_GAP_FLAGGED with `call_ended_early_partial_data`, or Manual Review if nothing was confirmed |
 
 ---
@@ -304,6 +328,9 @@ Settings → Verification Engine shows *Email delivery: on · smtp (smtp.gmail.c
 | POST | `/api/webhooks/bolna/facts` | Bolna custom function (mid-call facts) — Bearer `VOICE_WEBHOOK_SECRET` |
 | POST | `/api/webhooks/bolna/execution` | Bolna execution webhook (call ended) — `?token=VOICE_WEBHOOK_SECRET` |
 | POST | `/api/webhooks/voice/facts` · `/api/webhooks/voice` | Retell equivalents, `X-Retell-Signature` verified |
+| POST | `/api/payers/{id}/email` | Set/clear a payer's verification email |
+| GET | `/verify-form/{token}` | Hosted verification form (no auth — the token is the credential) |
+| POST | `/api/webhooks/email/facts/{token}` | Form submission → validated → same facts pipeline as voice/EDI |
 
 ---
 

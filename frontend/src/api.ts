@@ -2,15 +2,15 @@ export const API = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http
 
 export type JobStatus =
   | 'QUEUED' | 'PROCESSING' | 'VERIFIED' | 'COVERAGE_GAP_FLAGGED'
-  | 'RETRYING' | 'NEEDS_MANUAL_REVIEW' | 'MANUAL_RESOLVED' | 'CALL_IN_PROGRESS'
+  | 'RETRYING' | 'NEEDS_MANUAL_REVIEW' | 'MANUAL_RESOLVED' | 'CALL_IN_PROGRESS' | 'EMAIL_PENDING'
 
-export type ReviewReason = 'unsupported_payer' | 'ambiguous_match' | 'retry_exhausted' | 'malformed_response' | 'payer_rejected' | 'voice_call_failed' | 'call_timeout'
+export type ReviewReason = 'unsupported_payer' | 'ambiguous_match' | 'retry_exhausted' | 'malformed_response' | 'payer_rejected' | 'voice_call_failed' | 'call_timeout' | 'email_not_answered' | 'email_response_invalid'
 
-export type VerificationSource = 'stedi_270_271' | 'ai_voice_call'
+export type VerificationSource = 'stedi_270_271' | 'ai_voice_call' | 'email_form'
 
 export interface Payer {
   id: string; name: string; stediPayerId: string; supportsRealtime: boolean; serviceTypeCode: string; planType: string
-  providerServicesPhone?: string; ivrNotes?: string
+  providerServicesPhone?: string; ivrNotes?: string; providerServicesEmail?: string
 }
 
 export interface Patient {
@@ -40,7 +40,8 @@ export interface Job {
   errorCode?: string; errorMessage?: string; resolvedBy?: string; resolutionNote?: string
   startedAt?: string; completedAt?: string; resolvedAt?: string; createdAt: string; updatedAt: string
   verificationSource: VerificationSource; callId?: string; callTranscript?: string; callStartedAt?: string; callCompletedAt?: string
-  patientName: string; patientDob: string; memberId: string; payerName: string; stediPayerId: string; payerPhone?: string
+  emailToken?: string; emailSentAt?: string
+  patientName: string; patientDob: string; memberId: string; payerName: string; stediPayerId: string; payerPhone?: string; payerEmail?: string
 }
 
 export interface JobAttempt {
@@ -67,6 +68,7 @@ export interface ConfigInfo {
   llmEnabled: boolean; llmModel: string; maxWorkers: number; maxAttempts: number; retryBase: string; payerRPS: number; payerBurst: number
   emailDelivery?: boolean; emailProvider?: string; nightlyHour?: number; timezone?: string; practicePhone?: string; chatEnabled?: boolean
   voiceMode?: 'live' | 'mock'; voiceProvider?: 'bolna' | 'retell'; voiceCallTimeout?: string
+  emailFormEnabled?: boolean; emailFormBaseURL?: string; emailResponseTimeout?: string
 }
 
 
@@ -178,6 +180,7 @@ export const api = {
   queuePurge: () => req<{ purged: number }>('/api/queue/purge', { method: 'POST' }),
   notifications: () => req<Notification[]>('/api/notifications'),
   updatePayerVoice: (id: string, body: { providerServicesPhone: string; ivrNotes: string }) => req<Payer>(`/api/payers/${id}/voice`, { method: 'POST', body: JSON.stringify(body) }),
+  updatePayerEmail: (id: string, providerServicesEmail: string) => req<Payer>(`/api/payers/${id}/email`, { method: 'POST', body: JSON.stringify({ providerServicesEmail }) }),
   patientPdfUrl: (id: string) => `${API}/api/patients/${id}/pdf`,
   reportPdfUrl: () => `${API}/api/reports/pdf`,
 }
@@ -198,6 +201,7 @@ export const STATUS_META: Record<JobStatus, { label: string; tone: 'neutral' | '
   NEEDS_MANUAL_REVIEW: { label: 'Needs Review', tone: 'error' },
   MANUAL_RESOLVED: { label: 'Manually Verified', tone: 'success' },
   CALL_IN_PROGRESS: { label: 'Calling Payer', tone: 'violet' },
+  EMAIL_PENDING: { label: 'Awaiting Email Response', tone: 'violet' },
 }
 
 export const REASON_TEXT: Record<ReviewReason, string> = {
@@ -208,6 +212,8 @@ export const REASON_TEXT: Record<ReviewReason, string> = {
   payer_rejected: 'Payer rejected the request',
   voice_call_failed: 'AI phone call could not complete the verification',
   call_timeout: 'AI phone call timed out without a result',
+  email_not_answered: 'Verification email was not answered in time',
+  email_response_invalid: 'The submitted verification form had invalid or incomplete data',
 }
 
 export function fmtDate(s?: string) {

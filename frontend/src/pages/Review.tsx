@@ -5,8 +5,8 @@ import { useSelection } from '../hooks/useSelection'
 import { Drawer, SelectionBar, useToast } from '../components/ui'
 import { JobDetail } from '../components/JobDetail'
 
-const REASONS: ReviewReason[] = ['unsupported_payer', 'voice_call_failed', 'call_timeout', 'ambiguous_match', 'retry_exhausted', 'payer_rejected', 'malformed_response']
-const SHORT: Record<ReviewReason, string> = { unsupported_payer: 'Payer unsupported', voice_call_failed: 'AI call failed', call_timeout: 'AI call timed out', ambiguous_match: 'Subscriber not matched', retry_exhausted: 'Payer unavailable', payer_rejected: 'Payer rejected', malformed_response: 'Bad response' }
+const REASONS: ReviewReason[] = ['unsupported_payer', 'voice_call_failed', 'call_timeout', 'email_not_answered', 'email_response_invalid', 'ambiguous_match', 'retry_exhausted', 'payer_rejected', 'malformed_response']
+const SHORT: Record<ReviewReason, string> = { unsupported_payer: 'Payer unsupported', voice_call_failed: 'AI call failed', call_timeout: 'AI call timed out', email_not_answered: 'Email not answered', email_response_invalid: 'Bad form response', ambiguous_match: 'Subscriber not matched', retry_exhausted: 'Payer unavailable', payer_rejected: 'Payer rejected', malformed_response: 'Bad response' }
 
 export function Review() {
   const [jobs, setJobs] = useState<Job[]>([])
