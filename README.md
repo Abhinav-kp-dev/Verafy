@@ -18,6 +18,7 @@ Verafy is a full-stack insurance eligibility verification platform built for den
 - 🤖 **AI brief** — Gemini-powered plain-English coverage summary with post-hoc numeric validation; falls back to a deterministic template on any mismatch
 - 📬 **Pre-visit cost notices** — estimates patient out-of-pocket share (deductible → coinsurance → annual max) and emails it before the appointment
 - ☎️ **AI voice verification for payers with no EDI** — when a payer can't be checked electronically, a voice agent phones its provider-services line with the same member ID/DOB/NPI a 270 would carry, asks a fixed question script, records the answers through a structured tool call, and the result rejoins the normal pipeline tagged `ai_voice_call` (India-ready via Bolna; Retell supported)
+- 🩹 **Graceful early-hangup recovery** — if the call ends before the agent formally submits its findings, an LLM salvage pass reads the transcript and recovers whatever was actually confirmed up to that point, so a cut-short call still surfaces real (flagged, partial) data instead of an empty Manual Review case
 - 🔔 **Live notification center** — derived entirely from real state (new manual-review cases, failed email deliveries, a paused queue) — never a fabricated event
 - ⏯️ **Queue control** — pause/resume the verification queue and purge everything still waiting, from one toggle in the topbar
 - 📄 **PDF export** — download a single patient's record or the full practice report as a print-ready PDF, generated server-side
@@ -148,20 +149,24 @@ Some payers (e.g. Delta Dental in test mode) have no 270/271 path. Instead of pa
 2. It asks the voice platform to dial that line, passing the same fields a 270 carries (patient name, DOB, member ID, provider NPI, payer name, IVR hints) as per-call variables, and parks the job in `CALL_IN_PROGRESS` (live badge "Calling Payer").
 3. The agent follows a fixed question script — active/inactive, deductible + remaining, annual max + remaining, coinsurance for preventive/basic/major, orthodontics, waiting periods, rep name + reference number.
 4. As soon as it has the numbers it calls the `submit_verification_facts` tool → our webhook validates them (completeness + plausibility), maps them into the same `Facts` object the 271 normalizer produces, runs the normal brief pipeline, and finalizes to `VERIFIED` / `COVERAGE_GAP_FLAGGED` with `verification_source = ai_voice_call`.
-5. No answer, IVR dead end, dropped call, refused rep or a watchdog timeout (`VOICE_CALL_TIMEOUT`, default 10 min) → `NEEDS_MANUAL_REVIEW` with reason `voice_call_failed` / `call_timeout` and the transcript attached, so staff never start cold. A late webhook can never overwrite a finished job.
+5. No answer, IVR dead end, dropped call, refused rep or a watchdog timeout (`VOICE_CALL_TIMEOUT`, default 10 min) → first, if a transcript exists, a salvage pass tries to recover real confirmed data (see below); only if there's genuinely nothing usable does it fall to `NEEDS_MANUAL_REVIEW` with reason `voice_call_failed` / `call_timeout` and the transcript attached. A late webhook can never overwrite a finished job.
 
-**Provider:** [Bolna](https://bolna.ai) by default — India-native, its default line dials +91 numbers directly (the callee sees a +1 caller ID; connect an Exotel/Plivo number and set `BOLNA_FROM_NUMBER` for a +91 caller ID). Retell is supported via `VOICE_PROVIDER=retell`.
+**Provider:** [Bolna](https://bolna.ai) by default — India-native, its default line dials +91 numbers directly (the callee sees a +1 caller ID; connect a Plivo number in Bolna and set `BOLNA_FROM_NUMBER` for a +91 caller ID — Twilio's Indian numbers are inbound-only under TRAI rules and won't work here). Retell is supported via `VOICE_PROVIDER=retell`.
 
 **Mock mode** (`VOICE_MODE=mock`, the default) places no calls: a deterministic stand-in drives the exact same completion path, so the whole flow is demoable offline. Scenario is chosen by the member ID's last digit — `…0` no answer, `…9` IVR dead end, `…5` inactive coverage, anything else active. Transcripts in mock mode are clearly labelled as generated.
 
+**Ending a call early:** staff (or a demo) can hang up mid-conversation without losing everything. Whatever the representative had already confirmed — active/inactive, a deductible, a coinsurance percentage — is recovered from the transcript by a dedicated LLM pass (`internal/voiceagent.TranscriptExtractor`, reusing `OPENROUTER_API_KEY`) and run through the exact same completeness/plausibility gate (`voiceagent.Validate`) a normal tool call gets. If that passes, the job finalizes to `VERIFIED`/`COVERAGE_GAP_FLAGGED` same as always, just tagged with a `call_ended_early_partial_data` flag and a note in the brief — never silently upgraded to look like a complete call. If nothing usable was said before the hangup, it still correctly falls to Manual Review.
+
 ### Going live with Bolna (~15 min)
 
-1. Sign up at bolna.ai, copy the API key.
-2. Expose the backend publicly (e.g. `ngrok http 8080`) and open `GET /api/voice/agent-spec?baseUrl=https://<your-ngrok>.ngrok.app` — it returns the prompt, the custom-function definition in Bolna's own format (URL, `api_token`, `param` mapping), and the execution-webhook URL.
-3. In Bolna: create an agent, paste the prompt, add the custom function verbatim, and set **Extractions → Push all execution data to webhook** to the returned URL.
-4. `backend/.env`: `VOICE_MODE=live VOICE_PROVIDER=bolna BOLNA_API_KEY=… BOLNA_AGENT_ID=… VOICE_WEBHOOK_SECRET=<long random string>` (the same secret you pasted into the function's `api_token`; the webhook URL carries it as `?token=`).
-5. **Settings → Payer Settings → Add line** on any "No EDI" payer and enter the number to dial. For a demo, that can be a colleague's phone answering as the rep.
-6. Verify a patient on that payer and watch Dashboard → "Calling payer", then the drawer: brief, facts, transcript.
+1. Sign up at bolna.ai, copy the API key. On the **Calling** tab, set Telephony Provider to **Plivo** (not Twilio — see above) and connect a Plivo account with an Indian number.
+2. Expose the backend publicly (e.g. `ngrok http 8080`) and open `GET /api/voice/agent-spec?baseUrl=https://<your-ngrok>.ngrok.app` — it returns the prompt, the custom-function definition in Bolna's own format (URL, `api_token`, `param` mapping), and the execution-webhook URL. Note ngrok's free tier issues a new URL every restart — both the Tools-tab function URL and the Extractions-tab webhook URL need updating if the tunnel restarts.
+3. In Bolna: create an agent, paste the prompt into the **Agent** tab's Canvas (replacing anything the setup wizard drafted), add the custom function verbatim on the **Tools** tab, and set **Extractions → Push all execution data to webhook** to the returned URL.
+4. Copy the agent's real ID (visible in its dashboard entry) into `.env` as `BOLNA_AGENT_ID` — a mismatch here is the most common setup mistake and shows up as the call asking generic questions instead of running your script.
+5. `backend/.env`: `VOICE_MODE=live VOICE_PROVIDER=bolna BOLNA_API_KEY=… BOLNA_AGENT_ID=… VOICE_WEBHOOK_SECRET=<long random string>` (the same secret you pasted into the function's `api_token`; the webhook URL carries it as `?token=`).
+6. Trial accounts only call **verified numbers** — add both your Bolna-connected number and every destination number you'll dial (from the trial-plan banner in the dashboard) before testing.
+7. **Settings → Payer Settings → Add line** on any "No EDI" payer and enter the number to dial. For a demo, that can be a colleague's phone answering as the rep.
+8. Verify a patient on that payer and watch Dashboard → "Calling payer", then the drawer: brief, facts, transcript.
 
 ---
 
@@ -180,7 +185,7 @@ Some payers (e.g. Delta Dental in test mode) have no 270/271 path. Instead of pa
 | `PROVIDER_NAME` | `Riverside Dental Care` | | Sent on every 270 request |
 | `GEMINI_API_KEY` | — | for AI | Google AI Studio key |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | | Gemini model for briefs + chatbot |
-| `OPENROUTER_API_KEY` | — | optional | Alternative LLM via OpenRouter |
+| `OPENROUTER_API_KEY` | — | optional | Alternative LLM via OpenRouter; also powers the voice early-hangup transcript salvage |
 | `LLM_MODEL` | `openai/gpt-4o-mini` | | Model used with OpenRouter |
 | `MAX_WORKERS` | `20` | | Bounded worker pool size |
 | `MAX_ATTEMPTS` | `3` | | Retry budget before manual review |
@@ -235,6 +240,7 @@ Some payers (e.g. Delta Dental in test mode) have no 270/271 path. Instead of pa
 | Olivia Bennett | Delta Dental | `E788123456` | ☎️ CALL_IN_PROGRESS → VERIFIED via AI voice call (mock: active) |
 | any patient | Delta / Guardian | ends in `0` / `9` / `5` | ☎️ mock: no answer / IVR dead end → Manual Review · inactive → COVERAGE_GAP_FLAGGED |
 | any patient | Principal Dental | any | 🚨 NEEDS_MANUAL_REVIEW (no EDI and no phone line on file) |
+| any voice call | Delta / Guardian | ended before facts submitted | 🩹 transcript salvage → VERIFIED/COVERAGE_GAP_FLAGGED with `call_ended_early_partial_data`, or Manual Review if nothing was confirmed |
 
 ---
 
