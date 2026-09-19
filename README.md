@@ -10,7 +10,7 @@
 | **Team Name:**    | `MONARCH`                                       |
 | **Team Members:** | `Abhinav kp`·`Abhin krishna mp`·`Abhishek reji` · `Alin Alex`         |
 | **Institution:**  | `christ college of Engineering`                                 |
-| **Live Demo:**    | `https://drive.google.com/drive/folders/1ZBdEi1DGyWKRQi_K9ANP0CfriwSnbmkz`                                  |
+| **Live Demo:**    | `https://drive.google.com/drive/folders/1ZBdEi1DGyWKRQi_K9ANP0CfriwSnbmkz?usp=sharing`                                  |
 | **Pitch Video:**  | `https://www.instagram.com/reel/DdctpseztQp/?stkn=MTV5b2V6OXZtZXlyNg==`                        |
 
 ---
