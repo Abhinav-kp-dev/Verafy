@@ -347,9 +347,10 @@ cd backend && go test ./...
 
 | Name       | Role(s)                          | GitHub      | Email         |
 | ---------- | --------------------------------- | ----------- | ------------- |
-| `[Name 1]` | `[e.g. Full-stack / Backend]`     | `[@handle]` | `[email]`     |
-| `[Name 2]` | `[e.g. AI / Voice integration]`   | `[@handle]` | `[email]`     |
-| `[Name 3]` | `[e.g. Frontend / Design]`        | `[@handle]` | `[email]`     |
+|Abhinav kp| Full stack,api integration| Abhinav-kp-dev|abhinavkp2233@gmail.com|
+| Abhin krishna mp |  Backend | Abhin-Krishna-MP | abhinkrishnamp3@gmail.com   |
+| Abhishek reji | AGENTIC AI | reji-abhishek | abhishekreji2020@gmail.com  |
+| ALIN ALEX | Frontend        | AlinAlexMyladoor| alinalex441@gmail.com   |
 
 ---
 
