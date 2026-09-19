@@ -83,11 +83,11 @@ Every path — electronic, AI voice, or human-filled form — produces the same 
 
 | Screenshot                                            | Description                          |
 | ----------------------------------------------------- | ------------------------------------ |
-| `[Screenshot 1]`                                       | Dashboard — live verification counters, recent activity |
-| `[Screenshot 2]`                                       | AI voice call in progress for a no-EDI payer |
-| `[Screenshot 3]`                                       | Hosted email verification form |
-| `[Screenshot 4]`                                       | Manual Review with call transcript / form audit trail |
-| **Pitch Video**                                        | `[Link to your >30s social pitch video]` |
+| <img width="2940" height="1912" alt="image" src="https://github.com/user-attachments/assets/9d177836-afae-4d5b-b7b7-08732e961c68" />                                      | Dashboard — live verification counters, recent activity |
+| <img width="2940" height="1912" alt="image" src="https://github.com/user-attachments/assets/2159faab-13a4-419f-aa5b-5d3345a24feb" /> | AI voice call in progress for a no-EDI payer |
+| <img width="2940" height="1912" alt="image" src="https://github.com/user-attachments/assets/c8221522-32f8-4273-8f52-3fe196bf60d5" />    | Hosted email verification form |
+| <img width="2940" height="1912" alt="image" src="https://github.com/user-attachments/assets/27b49fc3-d074-499b-b78c-f4f3c914f9e4" />| Manual Review with call transcript / form audit trail |
+| **Pitch Video**                                        | https://www.instagram.com/reel/DdctpseztQp/?stkn=MTV5b2V6OXZtZXlyNg== |
 
 ---
 
